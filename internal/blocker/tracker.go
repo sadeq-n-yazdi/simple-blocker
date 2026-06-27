@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"sadeq.uk/simple-blocker/internal/config"
+	"code.sadeq.uk/simple-blocker/internal/config"
 )
 
 // Tracker records offenses per IP within a sliding time window and maps the

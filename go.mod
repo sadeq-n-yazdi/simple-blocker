@@ -1,4 +1,4 @@
-module sadeq.uk/simple-blocker
+module code.sadeq.uk/simple-blocker
 
 go 1.26.4
 

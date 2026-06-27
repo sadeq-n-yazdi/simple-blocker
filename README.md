@@ -39,7 +39,7 @@ Requires a Linux host with **systemd** and the **Go toolchain** (to build).
 The installer fetches a firewall backend for you if one isn't present.
 
 ```sh
-git clone https://github.com/sadeq-uk/simple-blocker.git   # or your fork
+git clone https://code.sadeq.uk/simple-blocker.git   # or your fork
 cd simple-blocker
 sudo ./scripts/install.sh
 ```

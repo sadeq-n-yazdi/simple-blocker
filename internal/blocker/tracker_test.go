@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"sadeq.uk/simple-blocker/internal/config"
+	"code.sadeq.uk/simple-blocker/internal/config"
 )
 
 func schedule() config.BanSchedule {

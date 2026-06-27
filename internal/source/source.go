@@ -14,7 +14,7 @@ import (
 	"regexp"
 	"time"
 
-	"sadeq.uk/simple-blocker/internal/config"
+	"code.sadeq.uk/simple-blocker/internal/config"
 )
 
 // Reporter is called with the offending IP and the source name for each match.

@@ -12,10 +12,10 @@ import (
 	"syscall"
 	"time"
 
-	"sadeq.uk/simple-blocker/internal/blocker"
-	"sadeq.uk/simple-blocker/internal/config"
-	"sadeq.uk/simple-blocker/internal/firewall"
-	"sadeq.uk/simple-blocker/internal/source"
+	"code.sadeq.uk/simple-blocker/internal/blocker"
+	"code.sadeq.uk/simple-blocker/internal/config"
+	"code.sadeq.uk/simple-blocker/internal/firewall"
+	"code.sadeq.uk/simple-blocker/internal/source"
 )
 
 func main() {
