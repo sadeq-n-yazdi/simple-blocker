@@ -1,0 +1,5 @@
+# Keep the original Python prototype out of the repo.
+# Ignore everything in this folder except this .gitignore itself,
+# so the legacy sources are never committed by accident.
+*
+!.gitignore
