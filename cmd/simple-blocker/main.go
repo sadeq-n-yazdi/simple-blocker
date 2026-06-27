@@ -5,9 +5,12 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
@@ -18,16 +21,83 @@ import (
 	"code.sadeq.uk/simple-blocker/internal/source"
 )
 
+// Build metadata, overridden at link time with -X main.version=... etc.
+// When built without ldflags, commit/date fall back to the Go VCS stamp.
+var (
+	version = "dev"
+	commit  = ""
+	date    = ""
+)
+
 func main() {
 	configPath := flag.String("config", "/etc/simple-blocker/config.yaml", "path to the config file (.yaml, .yml or .json)")
+	showVersion := flag.Bool("version", false, "print version information and exit")
 	flag.Parse()
 
+	// Support both `simple-blocker version` and `-version`.
+	if *showVersion || flag.Arg(0) == "version" {
+		fmt.Println(versionString())
+		return
+	}
+
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	slog.Info("simple-blocker", "version", version, "commit", buildCommit(), "date", buildDate())
 
 	if err := run(*configPath); err != nil {
 		slog.Error("fatal", "err", err)
 		os.Exit(1)
 	}
+}
+
+// versionString renders the human-readable version line.
+func versionString() string {
+	return fmt.Sprintf("simple-blocker %s (commit %s, built %s, %s)",
+		version, buildCommit(), buildDate(), runtime.Version())
+}
+
+// buildCommit returns the linker-provided commit, falling back to the VCS
+// revision embedded by the Go toolchain (`go build` without ldflags).
+func buildCommit() string {
+	if commit != "" {
+		return commit
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		rev, dirty := "", false
+		for _, s := range info.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				rev = s.Value
+			case "vcs.modified":
+				dirty = s.Value == "true"
+			}
+		}
+		if rev != "" {
+			if len(rev) > 12 {
+				rev = rev[:12]
+			}
+			if dirty {
+				rev += "-dirty"
+			}
+			return rev
+		}
+	}
+	return "unknown"
+}
+
+// buildDate returns the linker-provided build date, falling back to the VCS
+// commit time embedded by the Go toolchain.
+func buildDate() string {
+	if date != "" {
+		return date
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range info.Settings {
+			if s.Key == "vcs.time" {
+				return s.Value
+			}
+		}
+	}
+	return "unknown"
 }
 
 func run(configPath string) error {

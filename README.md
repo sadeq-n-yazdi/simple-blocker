@@ -88,10 +88,20 @@ Edit the config, then `sudo systemctl start simple-blocker`.
 ### Build manually
 
 ```sh
-make build          # -> dist/simple-blocker
+make build          # -> dist/simple-blocker (embeds version + commit hash)
 make test           # run the test suite
 sudo ./dist/simple-blocker -config /etc/simple-blocker/config.yaml
 ```
+
+Check the build metadata at any time:
+
+```sh
+simple-blocker version     # or: simple-blocker -version
+# simple-blocker v0.1.0 (commit 1a2b3c4..., built 2026-06-28T..., go1.26.4)
+```
+
+Released binaries are stamped via linker flags; a plain `go build` still shows
+the commit via Go's embedded VCS stamp.
 
 ## Configuration
 
