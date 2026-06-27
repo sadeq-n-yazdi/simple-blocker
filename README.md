@@ -65,6 +65,26 @@ sudo ./scripts/install.sh --no-enable          # install but don't start
 After installing, **edit `/etc/simple-blocker/config.yaml`** for your hosts and
 restart: `sudo systemctl restart simple-blocker`.
 
+### From a prebuilt package (.deb / .rpm)
+
+Each tagged release publishes static binaries and packages for Linux
+**amd64**, **arm64**, and **armv7** on the
+[releases page](https://github.com/sadeq-n-yazdi/simple-blocker/releases).
+
+```sh
+# Debian / Ubuntu (pick your arch)
+curl -LO https://github.com/sadeq-n-yazdi/simple-blocker/releases/latest/download/simple-blocker_<version>_linux_amd64.deb
+sudo apt install ./simple-blocker_<version>_linux_amd64.deb
+
+# Fedora / RHEL / openSUSE
+sudo rpm -i simple-blocker_<version>_linux_amd64.rpm
+```
+
+The package installs the binary to `/usr/bin`, the systemd unit, and example
+configs under `/etc/simple-blocker`. On first install it seeds
+`/etc/simple-blocker/config.yaml` and enables (but does not start) the service.
+Edit the config, then `sudo systemctl start simple-blocker`.
+
 ### Build manually
 
 ```sh

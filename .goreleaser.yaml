@@ -1,0 +1,99 @@
+# GoReleaser configuration.
+# Builds static Linux binaries for amd64/arm64/arm and packages them as
+# .deb and .rpm, plus tarballs, then publishes a GitHub release on tag push.
+# Docs: https://goreleaser.com
+version: 2
+
+project_name: simple-blocker
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: simple-blocker
+    main: ./cmd/simple-blocker
+    binary: simple-blocker
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - "7"
+
+archives:
+  - id: tarball
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}
+    files:
+      - README.md
+      - LICENSE
+      - config.example.yaml
+      - config.example.json
+      - simple-blocker.service
+      - src: packaging/systemd/simple-blocker.service
+        dst: packaging/simple-blocker.service
+
+nfpms:
+  - id: packages
+    package_name: simple-blocker
+    vendor: Sadeq N. Yazdi
+    homepage: https://github.com/sadeq-n-yazdi/simple-blocker
+    maintainer: Sadeq N. Yazdi <code@sadeq.uk>
+    description: |-
+      Dynamic IP blacklister that bans probing and brute-force IPs at the
+      firewall (ipset+iptables or nftables). Config-driven and extensible.
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+    # A firewall backend is required at runtime; the binary auto-detects which
+    # is present. Default to nftables; iptables+ipset are an alternative.
+    dependencies:
+      - nftables
+    recommends:
+      - ipset
+      - iptables
+    contents:
+      - src: packaging/systemd/simple-blocker.service
+        dst: /lib/systemd/system/simple-blocker.service
+      - src: config.example.yaml
+        dst: /etc/simple-blocker/config.example.yaml
+      - src: config.example.json
+        dst: /etc/simple-blocker/config.example.json
+      # The active config is created from the example by postinstall on first
+      # install; mark it so package upgrades never overwrite user edits.
+      - dst: /etc/simple-blocker
+        type: dir
+    scripts:
+      postinstall: packaging/scripts/postinstall.sh
+      preremove: packaging/scripts/preremove.sh
+      postremove: packaging/scripts/postremove.sh
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  github:
+    owner: sadeq-n-yazdi
+    name: simple-blocker
+  draft: false
+  prerelease: auto

@@ -1,0 +1,15 @@
+[Unit]
+Description=simple-blocker dynamic IP blacklister
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/simple-blocker -config /etc/simple-blocker/config.yaml
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
