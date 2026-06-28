@@ -84,6 +84,12 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "check":
+			if err := cmdCheck(os.Args[2:]); err != nil {
+				fmt.Fprintln(os.Stderr, "error:", err)
+				os.Exit(1)
+			}
+			return
 		}
 	}
 	runDaemon()
