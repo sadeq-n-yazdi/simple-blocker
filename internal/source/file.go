@@ -145,7 +145,10 @@ var builtinTSLayouts = []string{
 func parseTS(s string, layouts []string, now time.Time) (time.Time, bool) {
 	s = strings.TrimSpace(s)
 	for _, layout := range layouts {
-		t, err := time.Parse(layout, s)
+		// ParseInLocation honors an explicit zone in the layout (RFC3339, nginx
+		// CLF) and falls back to now's location for zoneless layouts (syslog,
+		// plain app logs), so a non-UTC daemon doesn't mis-window local logs.
+		t, err := time.ParseInLocation(layout, s, now.Location())
 		if err != nil {
 			continue
 		}

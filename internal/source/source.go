@@ -109,7 +109,7 @@ func newSource(c config.Source, follow bool) (*streamSource, error) {
 		return &streamSource{
 			name: name, re: re, ipIdx: ipIdx,
 			open: fileOpener(c.Target, follow), demux: rawFrame,
-			tsIdx: tsIdx, tsLayouts: layouts, cutoff: sinceCutoff(c.Since, time.Now()),
+			tsIdx: tsIdx, tsLayouts: layouts, since: c.Since,
 		}, nil
 	default:
 		return nil, fmt.Errorf("source %q: unknown type %q", name, c.Type)
@@ -212,13 +212,16 @@ type streamSource struct {
 	demux frameMode
 
 	// Optional per-line time-window filtering, used by file sources to skip
-	// lines older than cutoff. tsIdx is the submatch index of the "ts" capture
-	// group (0 disables filtering — a real named group is always index >= 1);
-	// tsLayouts are the timestamp layouts to try, and cutoff is the oldest line
-	// to accept. A line whose timestamp cannot be parsed is dropped (fail-closed).
+	// lines older than the cutoff. tsIdx is the submatch index of the "ts"
+	// capture group (0 disables filtering — a real named group is always index
+	// >= 1); tsLayouts are the timestamp layouts to try, and since is the raw
+	// lookback spec. The cutoff is derived from since against the current time
+	// per scan so a long-running daemon that retries or re-reads a file from the
+	// start only replays the configured window, not everything since startup. A
+	// line whose timestamp cannot be parsed is dropped (fail-closed).
 	tsIdx     int
 	tsLayouts []string
-	cutoff    time.Time
+	since     string
 }
 
 func (s *streamSource) Name() string { return s.name }
@@ -289,8 +292,9 @@ func (s *streamSource) stream(ctx context.Context, onMatch matchFunc) error {
 			if 2*s.tsIdx+1 >= len(loc) || loc[2*s.tsIdx] < 0 {
 				continue
 			}
-			t, ok := parseTS(line[loc[2*s.tsIdx]:loc[2*s.tsIdx+1]], s.tsLayouts, time.Now())
-			if !ok || t.Before(s.cutoff) {
+			now := time.Now()
+			t, ok := parseTS(line[loc[2*s.tsIdx]:loc[2*s.tsIdx+1]], s.tsLayouts, now)
+			if !ok || t.Before(sinceCutoff(s.since, now)) {
 				continue
 			}
 		}
