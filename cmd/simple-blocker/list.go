@@ -18,17 +18,22 @@ import (
 // its file watcher within a couple of seconds. On removal (and on whitelist
 // add) it also lifts any matching live bans from the firewall set.
 func cmdList(list string, args []string) error {
-	// Handle help before the positional dispatch consumes args[0] — otherwise
-	// `whitelist -h` would be read as an unknown action and `whitelist add -h`
-	// would try to add "-h" as a list entry.
-	for _, a := range args {
-		if a == "-h" || a == "--help" || a == "help" {
-			fmt.Print(listHelp(list))
-			return nil
-		}
-	}
+	// Handle help in the positional slots before the dispatch consumes them —
+	// otherwise `whitelist -h` would be read as an unknown action and
+	// `whitelist add -h` would try to add "-h" as a list entry. Only the
+	// positionals are checked (action, then the spec for add/remove); a help
+	// flag among the trailing flags is left to the flag parser, so a value like
+	// `-config help` is not mistaken for a help request.
 	if len(args) == 0 {
 		// A bare management command shows full help rather than a terse error.
+		fmt.Print(listHelp(list))
+		return nil
+	}
+	if isHelpArg(args[0]) {
+		fmt.Print(listHelp(list))
+		return nil
+	}
+	if (args[0] == "add" || args[0] == "remove") && len(args) > 1 && isHelpArg(args[1]) {
 		fmt.Print(listHelp(list))
 		return nil
 	}

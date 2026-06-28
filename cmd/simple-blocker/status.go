@@ -21,12 +21,15 @@ import (
 // cmdStatus implements `simple-blocker status`: show currently-banned IPs and,
 // when the daemon is reachable, the offense tracker and the diff between them.
 func cmdStatus(args []string) error {
-	fs := flag.NewFlagSet("status", flag.ExitOnError)
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stdout, statusHelp) }
 	configPath := fs.String("config", defaultConfigPath, "path to the config file")
 	socketFlag := fs.String("control-socket", "", "control socket path (overrides config)")
 	asJSON := fs.Bool("json", false, "emit the raw snapshot as JSON")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil // -h/--help already printed usage
+		}
 		return err
 	}
 

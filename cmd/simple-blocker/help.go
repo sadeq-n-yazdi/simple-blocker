@@ -56,6 +56,11 @@ Run "simple-blocker help <command>" for detailed help on a command.
 `)
 }
 
+// isHelpArg reports whether a positional argument is a help request.
+func isHelpArg(a string) bool {
+	return a == "-h" || a == "--help" || a == "help"
+}
+
 // commandHelp returns the detailed help text for a single command, and whether
 // the topic is known.
 func commandHelp(topic string) (string, bool) {
@@ -77,7 +82,8 @@ func commandHelp(topic string) (string, bool) {
 // runHelp handles `help [topic]`, `-h`, and `--help` at the top level. It
 // returns the process exit code: 0 for a resolved topic, 2 for an unknown one.
 func runHelp(topic string) int {
-	if topic == "" || topic == "help" {
+	// `help`, `help help`, and `help -h`/`--help` all mean the overview.
+	if topic == "" || topic == "help" || topic == "-h" || topic == "--help" {
 		printMainHelp(os.Stdout)
 		return 0
 	}
