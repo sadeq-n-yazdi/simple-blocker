@@ -48,8 +48,14 @@ const (
 // ReadCloser (or cancelling ctx) must unblock any in-flight Read.
 type opener func(ctx context.Context) (io.ReadCloser, error)
 
-// New builds a Source from its configuration.
+// New builds a following Source from its configuration (the daemon's mode).
 func New(c config.Source) (Source, error) {
+	return newSource(c, true)
+}
+
+// newSource builds a source; follow=true streams continuously (the daemon),
+// follow=false reads recent logs once and stops (the `check` command).
+func newSource(c config.Source, follow bool) (*streamSource, error) {
 	re, ipIdx, err := compilePattern(c.Pattern)
 	if err != nil {
 		return nil, fmt.Errorf("source %q: %w", label(c), err)
@@ -64,11 +70,12 @@ func New(c config.Source) (Source, error) {
 			if sock == "" {
 				sock = defaultDockerSocket
 			}
-			return newDockerAPISource(name, sock, c.Target, re, ipIdx), nil
+			return newDockerAPISource(name, sock, c.Target, re, ipIdx, follow), nil
 		case "external":
 			target := c.Target
 			build := func() *exec.Cmd {
-				return exec.Command("docker", "logs", "-f", "--tail", "100", target)
+				name, args := dockerLogsCmd(target, follow)
+				return exec.Command(name, args...)
 			}
 			return &streamSource{name: name, re: re, ipIdx: ipIdx, open: cmdOpener(build), demux: rawFrame}, nil
 		default:
@@ -82,12 +89,64 @@ func New(c config.Source) (Source, error) {
 		}
 		target, since := c.Target, c.Since
 		build := func() *exec.Cmd {
-			return exec.Command("stdbuf", "-oL", "journalctl", "-af", "--since="+since, "-u", target)
+			name, args := journalCmd(target, since, follow)
+			return exec.Command(name, args...)
 		}
 		return &streamSource{name: name, re: re, ipIdx: ipIdx, open: cmdOpener(build), demux: rawFrame}, nil
 	default:
 		return nil, fmt.Errorf("source %q: unknown type %q", name, c.Type)
 	}
+}
+
+// dockerLogsCmd builds the `docker logs` argv. Following adds -f; otherwise it
+// reads recent history and exits.
+func dockerLogsCmd(target string, follow bool) (string, []string) {
+	args := []string{"logs", "--tail", "100"}
+	if follow {
+		args = append(args, "-f")
+	}
+	return "docker", append(args, target)
+}
+
+// journalCmd builds the journalctl argv. Following uses stdbuf+`-af` for live
+// line-buffered output; otherwise it reads since the cutoff and exits.
+func journalCmd(unit, since string, follow bool) (string, []string) {
+	if follow {
+		return "stdbuf", []string{"-oL", "journalctl", "-af", "--since=" + since, "-u", unit}
+	}
+	return "journalctl", []string{"--no-pager", "--since=" + since, "-u", unit}
+}
+
+// Match is one log line that matched a source's pattern. IPStart/IPEnd index
+// the captured IP within Line (for highlighting); both are -1 if the IP group
+// did not participate.
+type Match struct {
+	Source  string
+	Line    string
+	IP      string
+	IPStart int
+	IPEnd   int
+}
+
+// Scan reads a source once (follow=false) or continuously (follow=true) and
+// calls onMatch for every line matching the pattern. It returns when the
+// stream ends (finite read) or ctx is cancelled. Nothing is banned.
+func Scan(ctx context.Context, c config.Source, follow bool, onMatch func(Match)) error {
+	s, err := newSource(c, follow)
+	if err != nil {
+		return err
+	}
+	cb := func(line string, ipStart, ipEnd int) {
+		m := Match{Source: s.name, Line: line, IPStart: ipStart, IPEnd: ipEnd}
+		if ipStart >= 0 && ipEnd >= 0 {
+			m.IP = line[ipStart:ipEnd]
+		}
+		onMatch(m)
+	}
+	if follow {
+		return s.runLoop(ctx, cb)
+	}
+	return s.stream(ctx, cb)
 }
 
 func label(c config.Source) string {
@@ -128,9 +187,22 @@ type streamSource struct {
 
 func (s *streamSource) Name() string { return s.name }
 
+// matchFunc is called for each matching line with the line and the byte span
+// of the captured IP within it.
+type matchFunc func(line string, ipStart, ipEnd int)
+
 func (s *streamSource) Run(ctx context.Context, report Reporter) error {
+	return s.runLoop(ctx, func(line string, a, b int) {
+		if a >= 0 && b >= 0 {
+			report(line[a:b], s.name)
+		}
+	})
+}
+
+// runLoop streams with retry/backoff until ctx is cancelled (following mode).
+func (s *streamSource) runLoop(ctx context.Context, onMatch matchFunc) error {
 	for ctx.Err() == nil {
-		if err := s.stream(ctx, report); err != nil && ctx.Err() == nil {
+		if err := s.stream(ctx, onMatch); err != nil && ctx.Err() == nil {
 			slog.Error("source failed, retrying", "source", s.name, "err", err, "in", retryDelay)
 			select {
 			case <-ctx.Done():
@@ -142,8 +214,8 @@ func (s *streamSource) Run(ctx context.Context, report Reporter) error {
 }
 
 // stream opens one instance of the byte stream and scans it until it ends or
-// ctx is cancelled.
-func (s *streamSource) stream(ctx context.Context, report Reporter) error {
+// ctx is cancelled, invoking onMatch per matching line.
+func (s *streamSource) stream(ctx context.Context, onMatch matchFunc) error {
 	rc, err := s.open(ctx)
 	if err != nil {
 		return err
@@ -170,9 +242,16 @@ func (s *streamSource) stream(ctx context.Context, report Reporter) error {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
-		if m := s.re.FindStringSubmatch(scanner.Text()); m != nil && s.ipIdx < len(m) {
-			report(m[s.ipIdx], s.name)
+		line := scanner.Text()
+		loc := s.re.FindStringSubmatchIndex(line)
+		if loc == nil {
+			continue
 		}
+		ipStart, ipEnd := -1, -1
+		if 2*s.ipIdx+1 < len(loc) {
+			ipStart, ipEnd = loc[2*s.ipIdx], loc[2*s.ipIdx+1]
+		}
+		onMatch(line, ipStart, ipEnd)
 	}
 	if ctx.Err() != nil {
 		return nil // expected: we closed the stream
