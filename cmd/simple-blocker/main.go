@@ -29,9 +29,12 @@ func buildSnapshot(fw firewall.Firewall, tracker *blocker.Tracker) (control.Snap
 	if err != nil {
 		return control.Snapshot{}, err
 	}
+	// Start from empty (non-nil) slices so the JSON has [] rather than null.
 	snap := control.Snapshot{
-		Backend: fw.Name(),
-		TS:      time.Now().UTC().Format(time.RFC3339),
+		Backend:   fw.Name(),
+		Bans:      []control.Ban{},
+		Offenders: []control.Offender{},
+		TS:        time.Now().UTC().Format(time.RFC3339),
 	}
 	for _, b := range bans {
 		snap.Bans = append(snap.Bans, control.Ban{

@@ -70,7 +70,12 @@ func fetchStatus(socket string, cfg *config.Config) (control.Snapshot, bool, err
 	if err != nil {
 		return control.Snapshot{}, false, fmt.Errorf("daemon not reachable and reading firewall failed: %w", err)
 	}
-	snap := control.Snapshot{Backend: fw.Name(), TS: time.Now().UTC().Format(time.RFC3339)}
+	snap := control.Snapshot{
+		Backend:   fw.Name(),
+		Bans:      []control.Ban{},
+		Offenders: []control.Offender{},
+		TS:        time.Now().UTC().Format(time.RFC3339),
+	}
 	for _, b := range bans {
 		snap.Bans = append(snap.Bans, control.Ban{IP: b.IP, ExpiresSeconds: int64(b.Expires.Seconds())})
 	}
