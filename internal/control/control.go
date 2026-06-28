@@ -8,11 +8,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
+	"syscall"
 	"time"
 )
+
+// maxSnapshotBytes caps how much a client will read from the socket, so a
+// malformed or hostile peer can't drive the reader out of memory.
+const maxSnapshotBytes = 10 * 1024 * 1024
 
 // DefaultSocket is where the daemon listens unless overridden.
 const DefaultSocket = "/run/simple-blocker.sock"
@@ -57,7 +63,11 @@ func Serve(ctx context.Context, path string, build func() (Snapshot, error)) err
 		return fmt.Errorf("control: socket %s already in use by a running daemon", path)
 	}
 	_ = os.Remove(path) // clear a stale socket from a hard crash
+	// Restrict the umask across net.Listen so the socket is never briefly
+	// world-accessible between creation and the chmod below.
+	oldUmask := syscall.Umask(0o177)
 	ln, err := net.Listen("unix", path)
+	syscall.Umask(oldUmask)
 	if err != nil {
 		return fmt.Errorf("control: listen %s: %w", path, err)
 	}
@@ -112,7 +122,7 @@ func Dial(path string) (Snapshot, error) {
 	defer conn.Close()
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	var snap Snapshot
-	if err := json.NewDecoder(conn).Decode(&snap); err != nil {
+	if err := json.NewDecoder(io.LimitReader(conn, maxSnapshotBytes)).Decode(&snap); err != nil {
 		return Snapshot{}, fmt.Errorf("control: decode snapshot: %w", err)
 	}
 	return snap, nil
