@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"syscall"
 	"time"
 )
 
@@ -63,17 +62,18 @@ func Serve(ctx context.Context, path string, build func() (Snapshot, error)) err
 		return fmt.Errorf("control: socket %s already in use by a running daemon", path)
 	}
 	_ = os.Remove(path) // clear a stale socket from a hard crash
-	// Restrict the umask across net.Listen so the socket is never briefly
-	// world-accessible between creation and the chmod below.
-	oldUmask := syscall.Umask(0o177)
 	ln, err := net.Listen("unix", path)
-	syscall.Umask(oldUmask)
 	if err != nil {
 		return fmt.Errorf("control: listen %s: %w", path, err)
 	}
 	defer ln.Close()
 	defer os.Remove(path)
 
+	// Lock the socket down to the owner. We deliberately avoid syscall.Umask
+	// here: it is process-global and this daemon concurrently execs log
+	// readers, so flipping the umask could affect their file creation. The
+	// brief pre-chmod window is not exploitable anyway — a default-umask socket
+	// is 0755, and connecting to a unix socket requires the write bit.
 	if err := os.Chmod(path, 0o600); err != nil {
 		slog.Warn("control: chmod socket", "err", err)
 	}
