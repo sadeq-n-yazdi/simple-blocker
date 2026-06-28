@@ -15,8 +15,11 @@ configurable and extensible.
 ## Features
 
 - **Config-driven** — YAML *or* JSON (chosen by file extension), no recompile.
-- **Pluggable firewall backends** — `ipset`+`iptables` (with `DOCKER-USER`
-  support) or native `nftables`, auto-detected.
+- **Internal or external enforcement** — the firewall runs as **pure-Go
+  nftables over netlink** (no external binaries) or shells out to the host's
+  tools; pick per-deployment via `firewall.mode` or `-firewall-mode`.
+- **Pluggable firewall backends** (external mode) — `ipset`+`iptables` (with
+  `DOCKER-USER` support) or native `nftables`, auto-detected.
 - **Pluggable log sources** — `journal` (systemd) and `docker` today; each is a
   regex with a named `(?P<ip>...)` capture group, so adding a new log shape is a
   config edit, not a code change.
@@ -114,8 +117,9 @@ ipset_name: simple_blacklist   # name of the ipset / nft set
 window: 3h                     # sliding window for counting offenses
 
 firewall:
-  backend: auto                # auto | iptables | nftables
-  chains: [INPUT, DOCKER-USER] # iptables chains (ignored by nftables)
+  mode: internal               # internal (pure-Go nftables) | external
+  backend: auto                # external only: auto | iptables | nftables
+  chains: [INPUT, DOCKER-USER] # external+iptables only
 
 ban_schedule:                  # highest matching tier wins
   - { offenses: 2, ban: 10m }
@@ -130,6 +134,26 @@ sources:
     since: -1d                 # journal lookback
     pattern: 'Invalid user \S+ from (?P<ip>\d{1,3}(?:\.\d{1,3}){3})'
 ```
+
+### Firewall: internal vs external
+
+`firewall.mode: internal` (the default) manages nftables directly over netlink
+from within the process — no `nft`, `iptables`, or `ipset` binary required, just
+a kernel with nftables. It creates an `inet simple_blocker` table with a timeout
+set and an `ip saddr @set drop` rule.
+
+`firewall.mode: external` shells out to the host's tools and honours `backend`
+(`auto`/`iptables`/`nftables`) — use it on hosts without nftables, or when you
+need iptables `DOCKER-USER` integration. Override the config at runtime with the
+flag:
+
+```sh
+simple-blocker -firewall-mode external -config /etc/simple-blocker/config.yaml
+```
+
+Either way the process needs `CAP_NET_ADMIN` (run as root or via the systemd
+unit). On shutdown the drop rule is removed but the ban set is kept, so active
+bans survive a restart.
 
 Durations use Go syntax (`10m`, `3h`, `24h`). Every source `pattern` must
 contain a capturing group for the address — name it `(?P<ip>...)`; an unnamed

@@ -2,6 +2,7 @@
   "ipset_name": "simple_blacklist",
   "window": "3h",
   "firewall": {
+    "mode": "internal",
     "backend": "auto",
     "chains": ["INPUT", "DOCKER-USER"]
   },

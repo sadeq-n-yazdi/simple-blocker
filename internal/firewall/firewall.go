@@ -30,10 +30,25 @@ type Config struct {
 	Chains  []string // iptables chains (ignored by nftables)
 }
 
-// New constructs a firewall backend. backend is "auto", "iptables" or
-// "nftables"; "auto" picks iptables+ipset when both are present, otherwise
-// nftables.
-func New(backend string, cfg Config) (Firewall, error) {
+// New constructs a firewall backend.
+//
+// mode selects the implementation: "internal" uses pure-Go nftables over
+// netlink (no external binaries); "external" (or "") shells out to the host's
+// firewall tools. backend only applies in external mode and is "auto",
+// "iptables" or "nftables"; "auto" picks iptables+ipset when both are present,
+// otherwise nftables.
+func New(mode, backend string, cfg Config) (Firewall, error) {
+	switch mode {
+	case "internal":
+		return newNative(cfg)
+	case "external", "":
+		return newExternal(backend, cfg)
+	default:
+		return nil, fmt.Errorf("unknown firewall mode %q (use internal or external)", mode)
+	}
+}
+
+func newExternal(backend string, cfg Config) (Firewall, error) {
 	switch backend {
 	case "iptables":
 		return newIPTables(cfg), nil

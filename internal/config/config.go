@@ -33,8 +33,12 @@ type Config struct {
 
 // Firewall configures the enforcement backend.
 type Firewall struct {
-	// Backend selects the firewall implementation: "auto" (default),
-	// "iptables", or "nftables".
+	// Mode selects the implementation: "internal" (pure-Go nftables over
+	// netlink, no external binaries) or "external" (shell out to the host's
+	// firewall tools). Defaults to "internal".
+	Mode string `yaml:"mode" json:"mode"`
+	// Backend selects the external firewall implementation: "auto" (default),
+	// "iptables", or "nftables". Only used when Mode is "external".
 	Backend string `yaml:"backend" json:"backend"`
 	// Chains lists the iptables chains to insert the DROP rule into
 	// (e.g. INPUT, DOCKER-USER). Ignored by the nftables backend.
@@ -174,6 +178,9 @@ func (c *Config) applyDefaults() {
 	if c.Window == 0 {
 		c.Window = Duration(3 * time.Hour)
 	}
+	if c.Firewall.Mode == "" {
+		c.Firewall.Mode = "internal"
+	}
 	if c.Firewall.Backend == "" {
 		c.Firewall.Backend = "auto"
 	}
@@ -193,6 +200,11 @@ func (c *Config) applyDefaults() {
 
 // Validate checks that the configuration is internally consistent.
 func (c *Config) Validate() error {
+	switch c.Firewall.Mode {
+	case "internal", "external":
+	default:
+		return fmt.Errorf("firewall.mode must be internal or external, got %q", c.Firewall.Mode)
+	}
 	switch c.Firewall.Backend {
 	case "auto", "iptables", "nftables":
 	default:

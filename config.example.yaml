@@ -8,13 +8,19 @@ ipset_name: simple_blacklist
 # Sliding window over which offenses are counted. Go duration syntax.
 window: 3h
 
-# Firewall backend: auto | iptables | nftables.
-#   auto      pick ipset+iptables when available, else nftables
-#   iptables  ipset + iptables DROP rules (supports DOCKER-USER)
-#   nftables  native nft set + drop rule
+# Firewall enforcement.
+#   mode: internal | external
+#     internal  pure-Go nftables over netlink — no external binaries needed
+#               (requires a kernel with nftables). This is the default.
+#     external  shell out to the host's firewall tools (see backend below).
+#   backend (external mode only): auto | iptables | nftables
+#     auto      pick ipset+iptables when available, else nftables
+#     iptables  ipset + iptables DROP rules (supports DOCKER-USER)
+#     nftables  native nft set + drop rule
 firewall:
+  mode: internal
   backend: auto
-  # iptables chains to insert the DROP rule into (ignored by nftables).
+  # iptables chains to insert the DROP rule into (external+iptables only).
   # Add DOCKER-USER when protecting containers published via Docker.
   chains:
     - INPUT
