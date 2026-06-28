@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"time"
 )
 
 // defaultDockerSocket is the Docker Engine API unix socket used when a docker
@@ -35,7 +36,8 @@ func newSocketClient(socketPath string) *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				var d net.Dialer
+				// Bound the dial so a hung daemon socket can't block forever.
+				d := net.Dialer{Timeout: 10 * time.Second}
 				return d.DialContext(ctx, "unix", socketPath)
 			},
 			DisableCompression: true,
@@ -96,6 +98,11 @@ func newStdDemuxReader(src io.Reader) *stdDemuxReader {
 }
 
 func (d *stdDemuxReader) Read(p []byte) (int, error) {
+	// Per io.Reader: a zero-length read returns immediately without consuming
+	// the stream (otherwise we'd eat a frame header and corrupt state).
+	if len(p) == 0 {
+		return 0, nil
+	}
 	// Skip past any zero-length frames so we never return (0, nil) for a
 	// non-empty p — that would violate io.Reader and can stall bufio.
 	for d.remaining == 0 {

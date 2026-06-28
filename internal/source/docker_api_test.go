@@ -96,6 +96,19 @@ func TestDemuxManyZeroLengthFrames(t *testing.T) {
 	}
 }
 
+func TestDemuxZeroLengthReadIsNoOp(t *testing.T) {
+	// Read(nil)/Read(empty) must return (0, nil) without consuming a header,
+	// so a subsequent real read still sees the full frame.
+	d := newStdDemuxReader(bytes.NewReader(frame(1, "5.5.5.5\n")))
+	if n, err := d.Read(nil); n != 0 || err != nil {
+		t.Fatalf("zero-length read = (%d, %v), want (0, nil)", n, err)
+	}
+	sc := bufio.NewScanner(d)
+	if !sc.Scan() || sc.Text() != "5.5.5.5" {
+		t.Fatalf("stream corrupted after zero-length read: %q (err %v)", sc.Text(), sc.Err())
+	}
+}
+
 func TestDemuxOversizedFrame(t *testing.T) {
 	// A header claiming ~4 GiB must be rejected, not cast to a negative int
 	// (which would panic the slice on 32-bit builds).
