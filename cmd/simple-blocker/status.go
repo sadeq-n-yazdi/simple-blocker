@@ -22,6 +22,7 @@ import (
 // when the daemon is reachable, the offense tracker and the diff between them.
 func cmdStatus(args []string) error {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stdout, statusHelp) }
 	configPath := fs.String("config", defaultConfigPath, "path to the config file")
 	socketFlag := fs.String("control-socket", "", "control socket path (overrides config)")
 	asJSON := fs.Bool("json", false, "emit the raw snapshot as JSON")

@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"runtime"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -71,10 +72,16 @@ type overrides struct {
 }
 
 func main() {
-	// Dispatch subcommands on the first argument; anything else (including a
-	// leading flag) runs the daemon.
+	// Dispatch subcommands on the first argument. A leading flag (e.g. -config)
+	// runs the daemon; an unrecognized non-flag word is a usage error.
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "-h", "--help", "help":
+			topic := ""
+			if os.Args[1] == "help" && len(os.Args) > 2 {
+				topic = os.Args[2]
+			}
+			os.Exit(runHelp(topic))
 		case "version":
 			fmt.Println(versionString())
 			return
@@ -96,6 +103,14 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		default:
+			// A non-flag first arg that isn't a known command is a typo'd
+			// command, not daemon input (the daemon takes no positional args).
+			if !strings.HasPrefix(os.Args[1], "-") {
+				fmt.Fprintf(os.Stderr, "simple-blocker: unknown command %q\n\n", os.Args[1])
+				printMainHelp(os.Stderr)
+				os.Exit(2)
+			}
 		}
 	}
 	runDaemon()
@@ -103,6 +118,7 @@ func main() {
 
 func runDaemon() {
 	fs := flag.NewFlagSet("simple-blocker", flag.ExitOnError)
+	fs.Usage = func() { printMainHelp(os.Stdout) }
 	configPath := fs.String("config", defaultConfigPath, "path to the config file (.yaml, .yml or .json)")
 	showVersion := fs.Bool("version", false, "print version information and exit")
 	firewallMode := fs.String("firewall-mode", "", "override firewall.mode: internal or external")
