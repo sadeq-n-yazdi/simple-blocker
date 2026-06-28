@@ -69,8 +69,9 @@ func fetchStatus(socket string, cfg *config.Config) (control.Snapshot, bool, err
 	}
 	// Fallback: read the firewall set directly (needs root). No tracker view.
 	fw, err := firewall.New(cfg.Firewall.Mode, cfg.Firewall.Backend, firewall.Config{
-		SetName: cfg.IPSetName,
-		Chains:  cfg.Firewall.Chains,
+		SetName:     cfg.IPSetName,
+		Chains:      cfg.Firewall.Chains,
+		EnforceIPv6: cfg.Firewall.EnforceIPv6,
 	})
 	if err != nil {
 		return control.Snapshot{}, false, err

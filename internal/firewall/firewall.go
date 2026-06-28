@@ -45,6 +45,12 @@ type BanEntry struct {
 type Config struct {
 	SetName string   // ipset / nft set name
 	Chains  []string // iptables chains (ignored by nftables)
+	// EnforceIPv6 requests a parallel IPv6 ban set + drop rule. It is opt-in and
+	// best-effort: a backend that cannot establish IPv6 enforcement (no
+	// ip6tables, a missing chain, an unsupported kernel) logs and skips it
+	// rather than failing Setup, and a v6 Ban it cannot enforce is a no-op. The
+	// IPv6 set name is derived from SetName (see v6SetName).
+	EnforceIPv6 bool
 }
 
 // New constructs a firewall backend.
@@ -88,7 +94,9 @@ func autodetect(cfg Config) (Firewall, error) {
 	return nil, fmt.Errorf("no supported firewall found: install ipset+iptables or nftables")
 }
 
-func hasBinary(name string) bool {
+// hasBinary reports whether name is on PATH. It is a package variable so tests
+// can simulate the presence (or absence) of tools like ip6tables.
+var hasBinary = func(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
 }

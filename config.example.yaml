@@ -18,11 +18,13 @@ window: 3h
 #   blacklist: addresses banned permanently the moment they trip a pattern.
 # Edit live with `simple-blocker whitelist|blacklist add|remove <spec>`; the
 # daemon applies changes within a couple of seconds without a restart.
-# Note: enforcement is IPv4-only, so blacklisting an IPv6 address has no effect.
+# IPv6 entries are honored for matching always; IPv6 *enforcement* (banning)
+# requires firewall.enforce_ipv6 below.
 whitelist:
   - 203.0.113.4
   - 10.0.0.0/24
   - 192.168.1.10-192.168.1.40
+  - 2001:db8::/32
 blacklist:
   - 198.51.100.0/24
 
@@ -43,6 +45,12 @@ firewall:
   chains:
     - INPUT
     - DOCKER-USER
+  # Opt in to banning IPv6 offenders (off by default). When on, a parallel IPv6
+  # ban set + drop rule is added alongside the IPv4 ones. Best-effort: a host
+  # that can't install v6 rules (e.g. ip6tables/DOCKER-USER absent on a Docker
+  # host without IPv6) logs and keeps enforcing IPv4. Make sure your source
+  # patterns capture IPv6 (see the ssh example below) for this to do anything.
+  enforce_ipv6: false
 
 # Escalating bans: when an IP reaches an offense count within the window, it
 # is banned for the matching tier's duration (highest matching tier wins).
@@ -61,11 +69,15 @@ ban_schedule:
 #   journal: always external (journalctl); internal is not supported
 sources:
   # Failed SSH logins from the systemd journal (journal is always external).
+  # The capture group is dual-stack: it matches IPv4, bare IPv6, and bracketed
+  # IPv6 (e.g. "from [2001:db8::1]:443"). The captured token is validated by the
+  # daemon (non-IPs are ignored), so a permissive class is safe. For IPv4 only,
+  # use: (?P<ip>\d{1,3}(?:\.\d{1,3}){3})
   - type: journal
     name: ssh
     target: ssh
     since: -1d
-    pattern: 'Invalid user \S+ from (?P<ip>\d{1,3}(?:\.\d{1,3}){3})'
+    pattern: 'Invalid user \S+ from \[?(?P<ip>[0-9a-fA-F:.]+)\]?'
 
   # Vulnerability probes hitting a Docker container (404s to risky paths).
   # Uncomment and set the container name to enable.

@@ -27,7 +27,7 @@ func TestNativeIntegration(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("requires root for netlink firewall operations")
 	}
-	fw, err := New("internal", "", Config{SetName: "sb_test_set"})
+	fw, err := New("internal", "", Config{SetName: "sb_test_set", EnforceIPv6: true})
 	if err != nil {
 		t.Skipf("cannot open netlink: %v", err)
 	}
@@ -41,22 +41,42 @@ func TestNativeIntegration(t *testing.T) {
 	if err := fw.Ban("203.0.113.7", time.Minute); err != nil {
 		t.Fatalf("Ban: %v", err)
 	}
-	// List must see the banned IP with a positive remaining timeout.
+	// A v6 ban exercises the parallel ipv6_addr set + drop rule.
+	if err := fw.Ban("2001:db8::dead", time.Minute); err != nil {
+		t.Fatalf("Ban v6: %v", err)
+	}
+	// List must see both banned IPs with a positive remaining timeout.
 	entries, err := fw.List(context.Background())
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	var found bool
+	found := map[string]bool{}
 	for _, e := range entries {
-		if e.IP == "203.0.113.7" {
-			found = true
+		switch e.IP {
+		case "203.0.113.7", "2001:db8::dead":
+			found[e.IP] = true
 			if e.Expires <= 0 || e.Expires > time.Minute {
 				t.Errorf("unexpected expires for %s: %v", e.IP, e.Expires)
 			}
 		}
 	}
-	if !found {
-		t.Errorf("List did not return the banned IP: %+v", entries)
+	for _, ip := range []string{"203.0.113.7", "2001:db8::dead"} {
+		if !found[ip] {
+			t.Errorf("List did not return banned IP %s: %+v", ip, entries)
+		}
+	}
+	// Unban the v6 entry and confirm it is gone.
+	if err := fw.Unban("2001:db8::dead"); err != nil {
+		t.Fatalf("Unban v6: %v", err)
+	}
+	entries, err = fw.List(context.Background())
+	if err != nil {
+		t.Fatalf("List after unban: %v", err)
+	}
+	for _, e := range entries {
+		if e.IP == "2001:db8::dead" {
+			t.Errorf("v6 entry still present after Unban: %+v", entries)
+		}
 	}
 	if err := fw.Teardown(); err != nil {
 		t.Fatalf("Teardown: %v", err)

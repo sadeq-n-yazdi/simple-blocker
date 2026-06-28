@@ -208,8 +208,9 @@ func run(configPath string, ov overrides) error {
 	}
 
 	fw, err := firewall.New(cfg.Firewall.Mode, cfg.Firewall.Backend, firewall.Config{
-		SetName: cfg.IPSetName,
-		Chains:  cfg.Firewall.Chains,
+		SetName:     cfg.IPSetName,
+		Chains:      cfg.Firewall.Chains,
+		EnforceIPv6: cfg.Firewall.EnforceIPv6,
 	})
 	if err != nil {
 		return err
@@ -243,7 +244,7 @@ func run(configPath string, ov overrides) error {
 	}
 
 	tracker := blocker.NewTracker(cfg.Window.Duration(), cfg.BanSchedule)
-	engine := blocker.NewEngine(tracker, fw, white, black)
+	engine := blocker.NewEngine(tracker, fw, white, black, cfg.Firewall.EnforceIPv6)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

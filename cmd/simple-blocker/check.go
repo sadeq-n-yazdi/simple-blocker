@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/netip"
 	"os"
 	"os/signal"
 	"sync"
@@ -73,6 +74,15 @@ func cmdCheck(args []string) error {
 		// then the escalating schedule.
 		if white.Contains(m.IP) {
 			fmt.Printf("    → %s is whitelisted — would not ban\n", m.IP)
+			return
+		}
+		// Mirror the engine's ban chokepoint, which skips a pure-IPv6 target
+		// (whether blacklisted or merely over threshold) unless enforce_ipv6 is
+		// on. This check sits before the blacklist branch so the dry-run matches
+		// the daemon exactly.
+		if addr, err := netip.ParseAddr(m.IP); err == nil &&
+			addr.Is6() && !addr.Is4In6() && !cfg.Firewall.EnforceIPv6 {
+			fmt.Printf("    → %s is IPv6 — would not ban (enforce_ipv6 is off)\n", m.IP)
 			return
 		}
 		if black.Contains(m.IP) {

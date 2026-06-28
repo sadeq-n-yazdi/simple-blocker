@@ -123,6 +123,7 @@ whitelist:                     # never ban these (wins over blacklist)
   - 203.0.113.4                #   single IP (v4 or v6)
   - 10.0.0.0/24                #   CIDR block
   - 192.168.1.10-192.168.1.40  #   inclusive range FROM-TO
+  - 2001:db8::/32              #   IPv6 CIDR
 blacklist:                     # ban permanently the moment they trip a pattern
   - 198.51.100.0/24
 
@@ -130,6 +131,7 @@ firewall:
   mode: internal               # internal (pure-Go nftables) | external
   backend: auto                # external only: auto | iptables | nftables
   chains: [INPUT, DOCKER-USER] # external+iptables only
+  enforce_ipv6: false          # opt in to banning IPv6 offenders (default off)
 
 ban_schedule:                  # highest matching tier wins
   - { offenses: 2, ban: 10m }
@@ -142,8 +144,14 @@ sources:
     name: ssh                  # label shown in logs
     target: ssh                # systemd unit (journal) or container (docker)
     since: -1d                 # journal lookback
-    pattern: 'Invalid user \S+ from (?P<ip>\d{1,3}(?:\.\d{1,3}){3})'
+    pattern: 'Invalid user \S+ from \[?(?P<ip>[0-9a-fA-F:.]+)\]?'
 ```
+
+The `ssh` pattern above uses a **dual-stack** capture group: it matches IPv4,
+bare IPv6, and bracketed IPv6 (`from [2001:db8::1]:443`). The captured token is
+validated by the daemon, so anything that isn't a real address is ignored — a
+permissive class like `[0-9a-fA-F:.]+` is safe. For IPv4 only, use
+`(?P<ip>\d{1,3}(?:\.\d{1,3}){3})`.
 
 ### Firewall: internal vs external
 
@@ -179,8 +187,28 @@ Two optional lists give you manual control on top of the schedule:
   monitored pattern (reactive, not on every packet).
 
 Each entry is a single IP (v4 or v6), an inclusive range `FROM-TO`, or a CIDR
-block. Enforcement is IPv4-only, so an IPv6 blacklist entry is matched but cannot
-be enforced (it is logged and skipped); IPv6 whitelist entries work fully.
+block. IPv6 entries are always honored for **matching**: a v6 whitelist entry
+fully protects, and a v6 blacklist/offender is **enforced** when
+`firewall.enforce_ipv6` is on (see below). With enforcement off (the default), a
+v6 ban target is logged and skipped.
+
+### IPv6 enforcement
+
+Matching is dual-stack out of the box, but actually **banning** IPv6 offenders is
+opt-in via `firewall.enforce_ipv6: true`. When enabled, each backend maintains a
+parallel IPv6 ban set and drop rule next to the IPv4 ones:
+
+- **internal / nftables** — an `ipv6_addr` set with an `ip6 saddr @set6 drop`
+  rule in the same `inet` table.
+- **iptables** — a second `hash:ip family inet6` ipset referenced from
+  `ip6tables` in the configured chains.
+
+It is **best-effort and failure-tolerant**: if a host can't install v6 rules
+(e.g. `ip6tables` or a `DOCKER-USER` v6 chain is absent on a Docker host without
+IPv6), the daemon logs the skip and keeps enforcing IPv4 — it never fails to
+start. For this to do anything, your source `pattern`s must capture IPv6 (the
+`ssh` example above does). It's off by default so upgrading an existing host
+doesn't silently start touching `ip6tables`.
 
 Manage the lists live without editing files by hand or restarting the daemon:
 
@@ -250,6 +278,14 @@ sudo ipset list simple_blacklist                          # iptables backend
 sudo nft list set inet simple_blocker simple_blacklist    # nftables backend
 ```
 
+With `enforce_ipv6` on, IPv6 bans live in a parallel set whose name is the IPv4
+set name with `6` appended (e.g. `simple_blacklist6`); `status` merges both:
+
+```sh
+sudo ipset list simple_blacklist6                         # iptables backend (v6)
+sudo nft list set inet simple_blocker simple_blacklist6   # nftables backend (v6)
+```
+
 ### `check` — dry-run the log matching
 
 ```sh
@@ -298,7 +334,8 @@ sudo rm -r /etc/simple-blocker
 sudo systemctl daemon-reload
 # Optionally drop the ban set:
 sudo ipset destroy simple_blacklist        # iptables backend
-sudo nft delete table inet simple_blocker  # nftables backend
+sudo ipset destroy simple_blacklist6       # iptables backend (if enforce_ipv6 was on)
+sudo nft delete table inet simple_blocker  # nftables backend (removes both families)
 ```
 
 ## Project layout
