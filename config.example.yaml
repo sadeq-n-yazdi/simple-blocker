@@ -87,3 +87,16 @@ sources:
   #   mode: internal                  # internal (Docker API) | external (docker logs)
   #   docker_host: /var/run/docker.sock  # optional socket override (internal mode)
   #   pattern: '(?P<ip>\d{1,3}(?:\.\d{1,3}){3})\s.*?"[A-Z]+\s+\S*\.(?:php|exe|xml|gz)\S*\s+HTTP/\d\.\d".*\s404\s'
+
+  # Vulnerability probes in a plain log file (e.g. an nginx access log). The
+  # daemon reads the file from the start, follows it live, and survives log
+  # rotation. The optional (?P<ts>...) group plus `since` skip lines older than
+  # the window so a restart doesn't re-count old hits; without a ts group the
+  # whole file is read each start. Lines whose timestamp can't be parsed are
+  # skipped (fail-closed). `time_format` overrides the auto-detected layout.
+  # - type: file
+  #   name: nginx-file
+  #   target: /var/log/nginx/access.log
+  #   since: -1d
+  #   # time_format: '02/Jan/2006:15:04:05 -0700'   # optional layout override
+  #   pattern: '(?P<ip>\d{1,3}(?:\.\d{1,3}){3})\s.*\[(?P<ts>[^\]]+)\]\s"[A-Z]+\s+\S*\.(?:php|exe|xml|gz|env)\S*\s+HTTP/\d\.\d".*\s404\s'

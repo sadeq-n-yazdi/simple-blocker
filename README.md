@@ -4,7 +4,8 @@ A small, dependency-light daemon that watches your logs for malicious probes
 and brute-force attempts, then bans the offending IPs at the firewall with
 escalating, time-limited bans.
 
-It tails log sources (the systemd journal, Docker container logs), matches each
+It tails log sources (the systemd journal, Docker container logs, plain log
+files), matches each
 line against configurable regular expressions, and when an address crosses an
 offense threshold within a sliding window it is dropped via **ipset + iptables**
 or **nftables** — whichever your host has. Bans expire automatically.
@@ -20,9 +21,10 @@ configurable and extensible.
   tools; pick per-deployment via `firewall.mode` or `-firewall-mode`.
 - **Pluggable firewall backends** (external mode) — `ipset`+`iptables` (with
   `DOCKER-USER` support) or native `nftables`, auto-detected.
-- **Pluggable log sources** — `journal` (systemd) and `docker` today; each is a
-  regex with a named `(?P<ip>...)` capture group, so adding a new log shape is a
-  config edit, not a code change.
+- **Pluggable log sources** — `journal` (systemd), `docker`, and `file` (tail a
+  plain log file, rotation-aware) today; each is a regex with a named
+  `(?P<ip>...)` capture group, so adding a new log shape is a config edit, not a
+  code change.
 - **Escalating bans** — more offenses inside the window ⇒ longer bans.
 - **Whitelist & blacklist** — never-ban and permanent-ban lists of IPs, ranges,
   or CIDRs, managed live (`simple-blocker whitelist|blacklist add|remove|show`)
@@ -36,7 +38,7 @@ configurable and extensible.
 ```
 log source ──▶ regex (?P<ip>…) ──▶ offense tracker ──▶ ban schedule ──▶ firewall
  (journal,        per line          sliding window      offenses→time     ipset/iptables
-  docker)                                                                  or nftables
+  docker, file)                                                            or nftables
 ```
 
 ## Install
@@ -140,11 +142,18 @@ ban_schedule:                  # highest matching tier wins
   - { offenses: 7, ban: 24h }
 
 sources:
-  - type: journal              # journal | docker
+  - type: journal              # journal | docker | file
     name: ssh                  # label shown in logs
-    target: ssh                # systemd unit (journal) or container (docker)
-    since: -1d                 # journal lookback
+    target: ssh                # systemd unit (journal), container (docker), or file path (file)
+    since: -1d                 # journal/file lookback
     pattern: 'Invalid user \S+ from \[?(?P<ip>[0-9a-fA-F:.]+)\]?'
+
+  - type: file                 # tail a plain log file (e.g. an nginx access log)
+    name: nginx-file
+    target: /var/log/nginx/access.log
+    since: -1d                 # skip lines older than this (needs a ts group, below)
+    # time_format: '02/Jan/2006:15:04:05 -0700'   # optional layout override
+    pattern: '(?P<ip>\d{1,3}(?:\.\d{1,3}){3})\s.*\[(?P<ts>[^\]]+)\]\s"[A-Z]+\s+\S*\.(?:php|env)\S*\s+HTTP/\d\.\d".*\s404\s'
 ```
 
 The `ssh` pattern above uses a **dual-stack** capture group: it matches IPv4,
@@ -235,8 +244,33 @@ Each source has a `mode`:
   with `docker_host`) using only the Go standard library — no `docker` CLI
   needed. `external` shells out to `docker logs -f`.
 - **journal** — always `external` (`journalctl`); `internal` is rejected.
+- **file** — has no mode (setting one is an error).
 
 Override docker sources at runtime with `-docker-mode internal|external`.
+
+### File sources and the time window
+
+A `file` source tails a plain log file. It reads from the **start**, follows it
+live, and survives **log rotation** — both rename + recreate (e.g. logrotate's
+default) and `copytruncate`. The file not existing yet is fine; it's retried
+until it appears.
+
+Because it reads from the start, a restart would re-count old lines. To avoid
+that, give the pattern an optional **`(?P<ts>...)`** capture for the line's
+timestamp: lines older than `since` (default `-1d`) are skipped. The format is
+**auto-detected** from common layouts (nginx/Apache, ISO 8601/RFC 3339, syslog);
+set `time_format` (a Go reference layout) to override. Two caveats:
+
+- **Fail-closed:** when a `ts` group is configured, a line whose timestamp can't
+  be parsed is **skipped**. Verify your pattern with `simple-blocker check`
+  before relying on it — a format mismatch silently disables that source.
+- **No `ts` group** means no time filtering: the whole file is read on every
+  start (and a restart re-counts old offenses).
+
+Even with a `ts` group, a restart replays up to `since` of history (matching the
+`journal` source's `-1d` default). On a busy web access log that can be a large
+backlog, and each replayed hit is counted as happening *now* — so a restart can
+re-ban IPs whose probing is up to `since` old. Shorten `since` if that matters.
 
 ### Adding a source
 
@@ -345,7 +379,7 @@ cmd/simple-blocker/    entrypoint (flags, wiring, signal handling)
 internal/config/       YAML/JSON loading, defaults, validation
 internal/blocker/      offense tracker (sliding window) + ban engine
 internal/firewall/     Firewall interface + iptables and nftables backends
-internal/source/       Source interface + journal and docker tailers
+internal/source/       Source interface + journal, docker, and file tailers
 scripts/install.sh     installer (deps, build, systemd)
 ```
 
