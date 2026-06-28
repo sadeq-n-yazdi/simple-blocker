@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -60,6 +61,11 @@ func cmdStatus(args []string) error {
 func fetchStatus(socket string, cfg *config.Config) (control.Snapshot, bool, error) {
 	if snap, err := control.Dial(socket); err == nil {
 		return snap, true, nil
+	} else if errors.Is(err, os.ErrPermission) {
+		// The socket exists but we can't connect (it's root-owned 0600). The
+		// firewall fallback below also needs root, so it would only produce a
+		// more confusing low-level error — fail with a clear hint instead.
+		return control.Snapshot{}, false, fmt.Errorf("permission denied connecting to control socket %s (try running with sudo): %w", socket, err)
 	}
 	// Fallback: read the firewall set directly (needs root). No tracker view.
 	fw, err := firewall.New(cfg.Firewall.Mode, cfg.Firewall.Backend, firewall.Config{
