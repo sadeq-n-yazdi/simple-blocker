@@ -59,6 +59,13 @@ type Source struct {
 	// Since limits how far back a journal source reads (e.g. "-1d").
 	// Ignored by non-journal sources. Defaults to "-1d".
 	Since string `yaml:"since" json:"since"`
+	// Mode selects the implementation: "internal" (pure-Go Docker Engine API)
+	// or "external" (exec `docker logs`). Only meaningful for docker; journal
+	// is always external. Defaults to "internal" for docker.
+	Mode string `yaml:"mode" json:"mode"`
+	// DockerHost overrides the Docker daemon unix socket path for internal
+	// docker sources. Defaults to "/var/run/docker.sock". Ignored otherwise.
+	DockerHost string `yaml:"docker_host" json:"docker_host"`
 }
 
 // BanTier maps a minimum offense count to a ban duration.
@@ -191,6 +198,14 @@ func (c *Config) applyDefaults() {
 		if c.Sources[i].Since == "" {
 			c.Sources[i].Since = "-1d"
 		}
+		if c.Sources[i].Mode == "" {
+			switch c.Sources[i].Type {
+			case "docker":
+				c.Sources[i].Mode = "internal"
+			case "journal":
+				c.Sources[i].Mode = "external"
+			}
+		}
 	}
 	// Keep the schedule sorted so DurationFor's "highest tier wins" holds.
 	sort.SliceStable(c.BanSchedule, func(i, j int) bool {
@@ -233,6 +248,14 @@ func (c *Config) Validate() error {
 		}
 		if s.Pattern == "" {
 			return fmt.Errorf("sources[%d]: pattern is required", i)
+		}
+		switch s.Mode {
+		case "", "internal", "external":
+		default:
+			return fmt.Errorf("sources[%d]: mode must be internal or external, got %q", i, s.Mode)
+		}
+		if s.Type == "journal" && s.Mode == "internal" {
+			return fmt.Errorf("sources[%d]: journal source does not support internal mode", i)
 		}
 	}
 	return nil
