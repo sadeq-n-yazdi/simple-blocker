@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -195,12 +196,5 @@ func joinOrNone(xs []string) string {
 	if len(xs) == 0 {
 		return "none"
 	}
-	out := ""
-	for i, x := range xs {
-		if i > 0 {
-			out += ", "
-		}
-		out += x
-	}
-	return out
+	return strings.Join(xs, ", ")
 }
