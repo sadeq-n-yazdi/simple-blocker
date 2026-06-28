@@ -1,11 +1,41 @@
 package main
 
 import (
+	"bytes"
 	"reflect"
+	"strings"
 	"testing"
 
 	"code.sadeq.uk/simple-blocker/internal/control"
 )
+
+func TestRenderStatus(t *testing.T) {
+	snap := control.Snapshot{
+		Backend:   "nftables-native",
+		Bans:      []control.Ban{{IP: "10.0.0.9", ExpiresSeconds: 300}},
+		Offenders: []control.Offender{{IP: "10.0.0.2", Count: 3, WouldBanSeconds: 1800}},
+	}
+	var buf bytes.Buffer
+	renderStatus(&buf, snap, true)
+	out := buf.String()
+	for _, want := range []string{"nftables-native", "Banned (firewall): 1", "10.0.0.9", "Offenders (tracker): 1", "10.0.0.2"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("render missing %q in:\n%s", want, out)
+		}
+	}
+	// 10.0.0.2 is over threshold (would-ban>0) but not in the ban set → anomaly.
+	if !strings.Contains(out, "NOT banned") {
+		t.Errorf("expected anomaly diff line:\n%s", out)
+	}
+}
+
+func TestRenderStatusFallbackNote(t *testing.T) {
+	var buf bytes.Buffer
+	renderStatus(&buf, control.Snapshot{Backend: "ipset+iptables", Bans: []control.Ban{}}, false)
+	if !strings.Contains(buf.String(), "daemon not running") {
+		t.Errorf("fallback render should note the daemon is down:\n%s", buf.String())
+	}
+}
 
 func TestDiffStatus(t *testing.T) {
 	snap := control.Snapshot{

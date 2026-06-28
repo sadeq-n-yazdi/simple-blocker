@@ -45,6 +45,12 @@ type Snapshot struct {
 // JSON Snapshot built by build, then closes it. It returns when ctx is
 // cancelled. The socket file is created 0600 and removed on shutdown.
 func Serve(ctx context.Context, path string, build func() (Snapshot, error)) error {
+	// If something is already listening, another daemon owns this socket; don't
+	// remove it out from under them. A failed dial means it's stale (or absent).
+	if conn, err := net.DialTimeout("unix", path, 100*time.Millisecond); err == nil {
+		conn.Close()
+		return fmt.Errorf("control: socket %s already in use by a running daemon", path)
+	}
 	_ = os.Remove(path) // clear a stale socket from a hard crash
 	ln, err := net.Listen("unix", path)
 	if err != nil {

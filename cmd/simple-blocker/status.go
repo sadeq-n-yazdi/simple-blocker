@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"text/tabwriter"
@@ -82,7 +83,7 @@ func fetchStatus(socket string, cfg *config.Config) (control.Snapshot, bool, err
 	return snap, false, nil
 }
 
-func renderStatus(w *os.File, snap control.Snapshot, live bool) {
+func renderStatus(w io.Writer, snap control.Snapshot, live bool) {
 	bans := map[string]int64{}
 	for _, b := range snap.Bans {
 		bans[b.IP] = b.ExpiresSeconds

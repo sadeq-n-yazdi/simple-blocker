@@ -39,4 +39,8 @@ func TestSnapshotPrunesExpired(t *testing.T) {
 			t.Fatalf("expected 3.3.3.3 pruned, got %+v", e)
 		}
 	}
+	// Snapshot must also drop the stale key from the map (no slow leak).
+	if _, ok := tr.offenses["3.3.3.3"]; ok {
+		t.Fatal("expected 3.3.3.3 removed from offenses map after Snapshot")
+	}
 }

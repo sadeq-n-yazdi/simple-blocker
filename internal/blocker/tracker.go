@@ -65,7 +65,9 @@ type OffenseEntry struct {
 }
 
 // Snapshot returns the current in-window offense state per IP, without
-// recording a new offense. It is read-only and safe for concurrent use.
+// recording a new offense. It is safe for concurrent use. As it scans, it also
+// prunes IPs whose offenses have all aged out, so the map cannot grow without
+// bound from one-off probers that never re-offend.
 func (t *Tracker) Snapshot() []OffenseEntry {
 	cutoff := t.now().Add(-t.window)
 
@@ -81,6 +83,7 @@ func (t *Tracker) Snapshot() []OffenseEntry {
 			}
 		}
 		if count == 0 {
+			delete(t.offenses, ip) // all stamps aged out — drop the stale key
 			continue
 		}
 		out = append(out, OffenseEntry{
