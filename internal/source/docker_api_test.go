@@ -79,6 +79,23 @@ func TestDemuxZeroLengthFrame(t *testing.T) {
 	}
 }
 
+func TestDemuxManyZeroLengthFrames(t *testing.T) {
+	// >100 consecutive empty frames would trip bufio's ErrNoProgress if Read
+	// returned (0, nil); the internal loop must skip them all.
+	var raw []byte
+	for i := 0; i < 200; i++ {
+		raw = append(raw, frame(1, "")...)
+	}
+	raw = append(raw, frame(1, "x 4.4.4.4\n")...)
+	lines, err := scanDemux(t, raw)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(lines) != 1 || lines[0] != "x 4.4.4.4" {
+		t.Fatalf("lines = %q", lines)
+	}
+}
+
 func TestDemuxTruncatedHeader(t *testing.T) {
 	// 5 bytes is less than the 8-byte header → ErrUnexpectedEOF.
 	_, err := scanDemux(t, []byte{1, 0, 0, 0, 5})

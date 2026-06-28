@@ -39,6 +39,9 @@ func newSocketClient(socketPath string) *http.Client {
 				return d.DialContext(ctx, "unix", socketPath)
 			},
 			DisableCompression: true,
+			// One long-lived stream per client; don't pool idle connections
+			// (avoids leaking fds/goroutines when a source restarts).
+			DisableKeepAlives: true,
 		},
 		Timeout: 0,
 	}
@@ -93,14 +96,13 @@ func newStdDemuxReader(src io.Reader) *stdDemuxReader {
 }
 
 func (d *stdDemuxReader) Read(p []byte) (int, error) {
-	if d.remaining == 0 {
+	// Skip past any zero-length frames so we never return (0, nil) for a
+	// non-empty p — that would violate io.Reader and can stall bufio.
+	for d.remaining == 0 {
 		if _, err := io.ReadFull(d.src, d.hdr[:]); err != nil {
 			return 0, err // io.EOF / io.ErrUnexpectedEOF propagate
 		}
 		d.remaining = int(binary.BigEndian.Uint32(d.hdr[4:8]))
-		if d.remaining == 0 {
-			return 0, nil // zero-length frame; caller will Read again
-		}
 	}
 	n := len(p)
 	if n > d.remaining {
