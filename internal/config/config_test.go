@@ -160,6 +160,27 @@ func TestSourceModeValidation(t *testing.T) {
 	}
 }
 
+func TestFileSourceAccepted(t *testing.T) {
+	js := []byte(`{"ban_schedule":[{"offenses":1,"ban":"5m"}],"sources":[{"type":"file","target":"/var/log/nginx/access.log","pattern":"(?P<ip>x)"}]}`)
+	cfg, err := Parse(js, ".json")
+	if err != nil {
+		t.Fatalf("file source should be accepted: %v", err)
+	}
+	if cfg.Sources[0].Mode != "" {
+		t.Errorf("file source should have no default mode, got %q", cfg.Sources[0].Mode)
+	}
+	if cfg.Sources[0].Since != "-1d" {
+		t.Errorf("file source should default since to -1d, got %q", cfg.Sources[0].Since)
+	}
+}
+
+func TestFileSourceModeRejected(t *testing.T) {
+	js := []byte(`{"ban_schedule":[{"offenses":1,"ban":"5m"}],"sources":[{"type":"file","target":"/var/log/x","mode":"internal","pattern":"(?P<ip>x)"}]}`)
+	if _, err := Parse(js, ".json"); err == nil {
+		t.Error("file source with a mode should be rejected")
+	}
+}
+
 func TestDockerHostRoundTrip(t *testing.T) {
 	js := []byte(`{"ban_schedule":[{"offenses":1,"ban":"5m"}],"sources":[{"type":"docker","target":"c","docker_host":"/run/docker.sock","pattern":"(?P<ip>x)"}]}`)
 	cfg, err := Parse(js, ".json")

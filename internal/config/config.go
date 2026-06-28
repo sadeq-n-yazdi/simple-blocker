@@ -62,25 +62,34 @@ type Firewall struct {
 
 // Source describes a single log source to tail for offenders.
 type Source struct {
-	// Type selects the source implementation: "docker" or "journal".
+	// Type selects the source implementation: "docker", "journal", or "file".
 	Type string `yaml:"type" json:"type"`
 	// Name is a human-readable label used in logs.
 	Name string `yaml:"name" json:"name"`
-	// Target is the container name (docker) or systemd unit (journal).
+	// Target is the container name (docker), systemd unit (journal), or log
+	// file path (file).
 	Target string `yaml:"target" json:"target"`
 	// Pattern is a regular expression with a named capture group "ip"
-	// that extracts the offending address from a matching log line.
+	// that extracts the offending address from a matching log line. A file
+	// source may also include an optional "ts" group to enable time-window
+	// filtering (see Since and TimeFormat).
 	Pattern string `yaml:"pattern" json:"pattern"`
-	// Since limits how far back a journal source reads (e.g. "-1d").
-	// Ignored by non-journal sources. Defaults to "-1d".
+	// Since limits how far back a source reads. For journal it is passed to
+	// journalctl (e.g. "-1d"). For file it is a lookback (e.g. "-1d", "12h")
+	// that skips lines older than the cutoff when the pattern has a "ts" group.
+	// Ignored by docker. Defaults to "-1d".
 	Since string `yaml:"since" json:"since"`
 	// Mode selects the implementation: "internal" (pure-Go Docker Engine API)
 	// or "external" (exec `docker logs`). Only meaningful for docker; journal
-	// is always external. Defaults to "internal" for docker.
+	// is always external and file does not use it. Defaults to "internal" for docker.
 	Mode string `yaml:"mode" json:"mode"`
 	// DockerHost overrides the Docker daemon unix socket path for internal
 	// docker sources. Defaults to "/var/run/docker.sock". Ignored otherwise.
 	DockerHost string `yaml:"docker_host" json:"docker_host"`
+	// TimeFormat overrides the timestamp layout for a file source's "ts" group
+	// (a Go reference layout, e.g. "02/Jan/2006:15:04:05 -0700"). Optional; when
+	// empty a built-in list of common layouts is auto-detected. Only used by file.
+	TimeFormat string `yaml:"time_format" json:"time_format"`
 }
 
 // BanTier maps a minimum offense count to a ban duration.
@@ -276,8 +285,8 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("at least one source must be configured")
 	}
 	for i, s := range c.Sources {
-		if s.Type != "docker" && s.Type != "journal" {
-			return fmt.Errorf("sources[%d]: type must be docker or journal, got %q", i, s.Type)
+		if s.Type != "docker" && s.Type != "journal" && s.Type != "file" {
+			return fmt.Errorf("sources[%d]: type must be docker, journal, or file, got %q", i, s.Type)
 		}
 		if s.Target == "" {
 			return fmt.Errorf("sources[%d]: target is required", i)
@@ -292,6 +301,9 @@ func (c *Config) Validate() error {
 		}
 		if s.Type == "journal" && s.Mode == "internal" {
 			return fmt.Errorf("sources[%d]: journal source does not support internal mode", i)
+		}
+		if s.Type == "file" && s.Mode != "" {
+			return fmt.Errorf("sources[%d]: file source does not support mode", i)
 		}
 	}
 	return nil

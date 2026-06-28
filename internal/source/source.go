@@ -1,9 +1,9 @@
 // Package source tails log streams and reports offending IP addresses.
 //
-// Each Source wraps a long-running byte stream (docker logs, journalctl, or the
-// Docker Engine API) and applies a regular expression to every line. New source
-// types only need to supply an opener; the streaming, matching and retry logic
-// is shared by streamSource.
+// Each Source wraps a long-running byte stream (docker logs, journalctl, the
+// Docker Engine API, or a tailed log file) and applies a regular expression to
+// every line. New source types only need to supply an opener; the streaming,
+// matching and retry logic is shared by streamSource.
 package source
 
 import (
@@ -93,6 +93,24 @@ func newSource(c config.Source, follow bool) (*streamSource, error) {
 			return exec.Command(name, args...)
 		}
 		return &streamSource{name: name, re: re, ipIdx: ipIdx, open: cmdOpener(build), demux: rawFrame}, nil
+	case "file":
+		// target is the log file path. An optional (?P<ts>...) capture enables
+		// time-window filtering: lines older than `since` (and lines whose
+		// timestamp won't parse) are skipped. Without a ts group the whole file
+		// is read from the start.
+		tsIdx := re.SubexpIndex("ts")
+		if tsIdx < 0 {
+			tsIdx = 0
+		}
+		layouts := builtinTSLayouts
+		if c.TimeFormat != "" {
+			layouts = append([]string{c.TimeFormat}, builtinTSLayouts...)
+		}
+		return &streamSource{
+			name: name, re: re, ipIdx: ipIdx,
+			open: fileOpener(c.Target, follow), demux: rawFrame,
+			tsIdx: tsIdx, tsLayouts: layouts, cutoff: sinceCutoff(c.Since, time.Now()),
+		}, nil
 	default:
 		return nil, fmt.Errorf("source %q: unknown type %q", name, c.Type)
 	}
@@ -192,6 +210,15 @@ type streamSource struct {
 	ipIdx int
 	open  opener
 	demux frameMode
+
+	// Optional per-line time-window filtering, used by file sources to skip
+	// lines older than cutoff. tsIdx is the submatch index of the "ts" capture
+	// group (0 disables filtering — a real named group is always index >= 1);
+	// tsLayouts are the timestamp layouts to try, and cutoff is the oldest line
+	// to accept. A line whose timestamp cannot be parsed is dropped (fail-closed).
+	tsIdx     int
+	tsLayouts []string
+	cutoff    time.Time
 }
 
 func (s *streamSource) Name() string { return s.name }
@@ -255,6 +282,17 @@ func (s *streamSource) stream(ctx context.Context, onMatch matchFunc) error {
 		loc := s.re.FindStringSubmatchIndex(line)
 		if loc == nil {
 			continue
+		}
+		// File sources skip lines outside the time window. A line whose
+		// timestamp won't parse is dropped rather than acted on (fail-closed).
+		if s.tsIdx > 0 {
+			if 2*s.tsIdx+1 >= len(loc) || loc[2*s.tsIdx] < 0 {
+				continue
+			}
+			t, ok := parseTS(line[loc[2*s.tsIdx]:loc[2*s.tsIdx+1]], s.tsLayouts, time.Now())
+			if !ok || t.Before(s.cutoff) {
+				continue
+			}
 		}
 		ipStart, ipEnd := -1, -1
 		if 2*s.ipIdx+1 < len(loc) {
