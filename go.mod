@@ -3,6 +3,7 @@ module code.sadeq.uk/simple-blocker
 go 1.26.4
 
 require (
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/google/nftables v0.3.0
 	golang.org/x/sys v0.31.0
 	gopkg.in/yaml.v3 v3.0.1

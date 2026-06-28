@@ -24,6 +24,9 @@ configurable and extensible.
   regex with a named `(?P<ip>...)` capture group, so adding a new log shape is a
   config edit, not a code change.
 - **Escalating bans** — more offenses inside the window ⇒ longer bans.
+- **Whitelist & blacklist** — never-ban and permanent-ban lists of IPs, ranges,
+  or CIDRs, managed live (`simple-blocker whitelist|blacklist add|remove|show`)
+  and hot-reloaded from the config file without a restart.
 - **Sliding window** — old offenses age out automatically.
 - **Restart-safe** — rules and sets are created idempotently; existing bans
   survive a restart.
@@ -116,6 +119,13 @@ YAML and JSON are interchangeable — pick by file extension. See
 ipset_name: simple_blacklist   # name of the ipset / nft set
 window: 3h                     # sliding window for counting offenses
 
+whitelist:                     # never ban these (wins over blacklist)
+  - 203.0.113.4                #   single IP (v4 or v6)
+  - 10.0.0.0/24                #   CIDR block
+  - 192.168.1.10-192.168.1.40  #   inclusive range FROM-TO
+blacklist:                     # ban permanently the moment they trip a pattern
+  - 198.51.100.0/24
+
 firewall:
   mode: internal               # internal (pure-Go nftables) | external
   backend: auto                # external only: auto | iptables | nftables
@@ -158,6 +168,35 @@ bans survive a restart.
 Durations use Go syntax (`10m`, `3h`, `24h`). Every source `pattern` must
 contain a capturing group for the address — name it `(?P<ip>...)`; an unnamed
 first group is accepted as a fallback.
+
+### Whitelist & blacklist
+
+Two optional lists give you manual control on top of the schedule:
+
+- **`whitelist`** — addresses the daemon must **never** ban, even when they trip
+  a pattern. Whitelist wins over blacklist.
+- **`blacklist`** — addresses banned **permanently** the moment they trip a
+  monitored pattern (reactive, not on every packet).
+
+Each entry is a single IP (v4 or v6), an inclusive range `FROM-TO`, or a CIDR
+block. Enforcement is IPv4-only, so an IPv6 blacklist entry is matched but cannot
+be enforced (it is logged and skipped); IPv6 whitelist entries work fully.
+
+Manage the lists live without editing files by hand or restarting the daemon:
+
+```sh
+sudo simple-blocker blacklist add 198.51.100.0/24   # add a CIDR
+sudo simple-blocker whitelist add 203.0.113.4        # never ban this host
+sudo simple-blocker blacklist remove 198.51.100.7    # also lifts any live ban
+simple-blocker whitelist show                        # list current entries
+```
+
+These edit the config file in place (preserving YAML comments) and the daemon
+applies the change within a couple of seconds — it watches the config file and
+hot-reloads the lists with no restart. `remove` (and `whitelist add`) also delete
+matching entries from the live firewall set, so the change takes effect
+immediately; that part needs root. Only the lists are hot-reloaded — changing
+sources, the firewall backend, or the schedule still requires a restart.
 
 ### Source mode: internal vs external
 
@@ -231,7 +270,21 @@ pattern with the **captured IP highlighted**, and — on by default — the
     → offense #2 from 45.9.1.2 within 3h → would ban 10m
 ```
 
-It bans nothing and needs no privileges — a pure diagnostic.
+It bans nothing and needs no privileges — a pure diagnostic. Whitelisted and
+blacklisted addresses are reflected here too ("would not ban" / "would ban
+permanently").
+
+### `whitelist` / `blacklist` — manage the lists
+
+```sh
+sudo simple-blocker blacklist add 198.51.100.0/24
+sudo simple-blocker whitelist add 203.0.113.4
+sudo simple-blocker blacklist remove 198.51.100.7   # also lifts a live ban
+simple-blocker blacklist show
+```
+
+See [Whitelist & blacklist](#whitelist--blacklist) above for the entry grammar
+and hot-reload behaviour.
 
 On shutdown the service removes its drop rules but **keeps the ban set**, so
 in-flight bans persist across restarts.

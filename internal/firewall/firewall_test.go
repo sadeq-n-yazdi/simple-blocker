@@ -62,6 +62,57 @@ func TestIPTablesBanUsesSeconds(t *testing.T) {
 	}
 }
 
+func TestIPTablesBanPermanent(t *testing.T) {
+	calls := withRunner(t)
+	fw := newIPTables(Config{SetName: "bl", Chains: []string{"INPUT"}})
+	if err := fw.Ban("1.2.3.4", 0); err != nil {
+		t.Fatalf("Ban: %v", err)
+	}
+	want := "ipset add -exist bl 1.2.3.4 timeout 0"
+	if (*calls)[0] != want {
+		t.Errorf("Ban call = %q, want %q", (*calls)[0], want)
+	}
+}
+
+func TestIPTablesUnban(t *testing.T) {
+	calls := withRunner(t)
+	fw := newIPTables(Config{SetName: "bl", Chains: []string{"INPUT"}})
+	if err := fw.Unban("1.2.3.4"); err != nil {
+		t.Fatalf("Unban: %v", err)
+	}
+	want := "ipset del -exist bl 1.2.3.4"
+	if (*calls)[0] != want {
+		t.Errorf("Unban call = %q, want %q", (*calls)[0], want)
+	}
+}
+
+func TestNFTablesBanPermanentOmitsTimeout(t *testing.T) {
+	calls := withRunner(t)
+	fw := newNFTables(Config{SetName: "bl"})
+	if err := fw.Ban("5.6.7.8", 0); err != nil {
+		t.Fatalf("Ban: %v", err)
+	}
+	joined := strings.Join(*calls, "\n")
+	if !strings.Contains(joined, "add element inet simple_blocker bl { 5.6.7.8 }") {
+		t.Errorf("expected add element without timeout, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "timeout") {
+		t.Errorf("permanent ban must not include a timeout, got:\n%s", joined)
+	}
+}
+
+func TestNFTablesUnban(t *testing.T) {
+	calls := withRunner(t)
+	fw := newNFTables(Config{SetName: "bl"})
+	if err := fw.Unban("5.6.7.8"); err != nil {
+		t.Fatalf("Unban: %v", err)
+	}
+	joined := strings.Join(*calls, "\n")
+	if !strings.Contains(joined, "delete element inet simple_blocker bl { 5.6.7.8 }") {
+		t.Errorf("expected delete element, got:\n%s", joined)
+	}
+}
+
 func TestNFTablesBanRefreshesElement(t *testing.T) {
 	calls := withRunner(t)
 	fw := newNFTables(Config{SetName: "bl"})

@@ -123,6 +123,32 @@ func (f *native) Ban(ip string, d time.Duration) error {
 	return f.conn.Flush()
 }
 
+func (f *native) Unban(ip string) error {
+	addr := net.ParseIP(ip)
+	if addr == nil || addr.To4() == nil {
+		return fmt.Errorf("nftables: not an IPv4 address: %q", ip)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	set := f.set
+	if set == nil {
+		s, err := f.conn.GetSetByName(
+			&nftables.Table{Family: nftables.TableFamilyINet, Name: nftTable},
+			f.setName,
+		)
+		if err != nil {
+			return fmt.Errorf("nftables: get set %q: %w", f.setName, err)
+		}
+		set = s
+	}
+	if err := f.conn.SetDeleteElements(set, []nftables.SetElement{
+		{Key: addr.To4()},
+	}); err != nil {
+		return fmt.Errorf("nftables: delete element: %w", err)
+	}
+	return f.conn.Flush()
+}
+
 // List reads the set's elements over netlink. It works without a prior Setup
 // by resolving the set by name, so a standalone "status" can read live bans.
 func (f *native) List(ctx context.Context) ([]BanEntry, error) {

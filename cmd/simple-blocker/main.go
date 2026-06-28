@@ -90,6 +90,12 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "whitelist", "blacklist":
+			if err := cmdList(os.Args[1], os.Args[2:]); err != nil {
+				fmt.Fprintln(os.Stderr, "error:", err)
+				os.Exit(1)
+			}
+			return
 		}
 	}
 	runDaemon()
@@ -231,11 +237,39 @@ func run(configPath string, ov overrides) error {
 		}
 	}()
 
+	white, black, err := cfg.IPLists()
+	if err != nil {
+		return err
+	}
+
 	tracker := blocker.NewTracker(cfg.Window.Duration(), cfg.BanSchedule)
-	engine := blocker.NewEngine(tracker, fw)
+	engine := blocker.NewEngine(tracker, fw, white, black)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Hot-reload the whitelist/blacklist when the config file changes. Only the
+	// lists are applied live; other field changes still require a restart. A bad
+	// reload is logged and the current lists are kept (fail-safe).
+	go func() {
+		if err := config.Watch(ctx, configPath, func() {
+			ncfg, err := config.Load(configPath)
+			if err != nil {
+				slog.Error("config reload failed, keeping current lists", "err", err)
+				return
+			}
+			nw, nb, err := ncfg.IPLists()
+			if err != nil {
+				slog.Error("config reload: bad list entry, keeping current lists", "err", err)
+				return
+			}
+			engine.SetLists(nw, nb)
+			slog.Info("config lists reloaded",
+				"whitelist", len(ncfg.Whitelist), "blacklist", len(ncfg.Blacklist))
+		}); err != nil && ctx.Err() == nil {
+			slog.Warn("config watch unavailable", "err", err)
+		}
+	}()
 
 	// Serve live status on the control socket (read-only) for the `status`
 	// command. Failure to listen is non-fatal — the daemon still bans.

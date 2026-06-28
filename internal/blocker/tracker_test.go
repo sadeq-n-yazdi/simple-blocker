@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"code.sadeq.uk/simple-blocker/internal/config"
+	"code.sadeq.uk/simple-blocker/internal/ipmatch"
 )
 
 func schedule() config.BanSchedule {
@@ -84,9 +85,26 @@ func (f *fakeBanner) Ban(ip string, d time.Duration) error {
 	return nil
 }
 
+// emptyLists returns two empty (match-nothing) matchers.
+func emptyLists() (*ipmatch.List, *ipmatch.List) {
+	w, _ := ipmatch.New(nil)
+	b, _ := ipmatch.New(nil)
+	return w, b
+}
+
+func mustList(t *testing.T, specs ...string) *ipmatch.List {
+	t.Helper()
+	l, err := ipmatch.New(specs)
+	if err != nil {
+		t.Fatalf("ipmatch.New(%v): %v", specs, err)
+	}
+	return l
+}
+
 func TestEngineBansOnlyWhenScheduled(t *testing.T) {
 	fb := &fakeBanner{}
-	e := NewEngine(NewTracker(time.Hour, schedule()), fb)
+	w, b := emptyLists()
+	e := NewEngine(NewTracker(time.Hour, schedule()), fb, w, b)
 	e.Report("9.9.9.9", "ssh") // count 1: no ban
 	if len(fb.bans) != 0 {
 		t.Fatalf("expected no ban on first offense, got %d", len(fb.bans))
@@ -94,5 +112,58 @@ func TestEngineBansOnlyWhenScheduled(t *testing.T) {
 	e.Report("9.9.9.9", "ssh") // count 2: 10m ban
 	if len(fb.bans) != 1 || fb.bans[0].d != 10*time.Minute {
 		t.Fatalf("expected one 10m ban, got %+v", fb.bans)
+	}
+}
+
+func TestEngineWhitelistNeverBans(t *testing.T) {
+	fb := &fakeBanner{}
+	e := NewEngine(NewTracker(time.Hour, schedule()), fb, mustList(t, "9.9.9.0/24"), mustList(t))
+	for i := 0; i < 5; i++ {
+		e.Report("9.9.9.9", "ssh")
+	}
+	if len(fb.bans) != 0 {
+		t.Fatalf("whitelisted IP was banned: %+v", fb.bans)
+	}
+}
+
+func TestEngineBlacklistBansPermanently(t *testing.T) {
+	fb := &fakeBanner{}
+	e := NewEngine(NewTracker(time.Hour, schedule()), fb, mustList(t), mustList(t, "8.8.8.0/24"))
+	e.Report("8.8.8.8", "ssh") // first sighting bans permanently
+	if len(fb.bans) != 1 || fb.bans[0].d != 0 {
+		t.Fatalf("expected one permanent (d=0) ban, got %+v", fb.bans)
+	}
+}
+
+func TestEngineWhitelistWinsOverBlacklist(t *testing.T) {
+	fb := &fakeBanner{}
+	e := NewEngine(NewTracker(time.Hour, schedule()), fb, mustList(t, "7.7.7.7"), mustList(t, "7.7.7.7"))
+	e.Report("7.7.7.7", "ssh")
+	if len(fb.bans) != 0 {
+		t.Fatalf("whitelist should win over blacklist, got %+v", fb.bans)
+	}
+}
+
+func TestEngineSetListsSwap(t *testing.T) {
+	fb := &fakeBanner{}
+	w, b := emptyLists()
+	e := NewEngine(NewTracker(time.Hour, schedule()), fb, w, b)
+	e.Report("6.6.6.6", "ssh") // not listed: count 1, no ban
+	if len(fb.bans) != 0 {
+		t.Fatalf("unexpected ban before swap: %+v", fb.bans)
+	}
+	e.SetLists(mustList(t), mustList(t, "6.6.6.6")) // now blacklisted
+	e.Report("6.6.6.6", "ssh")
+	if len(fb.bans) != 1 || fb.bans[0].d != 0 {
+		t.Fatalf("expected permanent ban after swap, got %+v", fb.bans)
+	}
+}
+
+func TestEngineSkipsIPv6Enforcement(t *testing.T) {
+	fb := &fakeBanner{}
+	e := NewEngine(NewTracker(time.Hour, schedule()), fb, mustList(t), mustList(t, "2001:db8::/32"))
+	e.Report("2001:db8::1", "ssh") // matches blacklist but can't be enforced
+	if len(fb.bans) != 0 {
+		t.Fatalf("v6 target should be skipped, not banned: %+v", fb.bans)
 	}
 }

@@ -12,6 +12,20 @@ control_socket: /run/simple-blocker.sock
 # Sliding window over which offenses are counted. Go duration syntax.
 window: 3h
 
+# Manual overrides. Each entry is a single IP (v4 or v6), an inclusive range
+# "FROM-TO", or a CIDR block. Whitelist wins over blacklist.
+#   whitelist: addresses the daemon must never ban (even if they trip a pattern).
+#   blacklist: addresses banned permanently the moment they trip a pattern.
+# Edit live with `simple-blocker whitelist|blacklist add|remove <spec>`; the
+# daemon applies changes within a couple of seconds without a restart.
+# Note: enforcement is IPv4-only, so blacklisting an IPv6 address has no effect.
+whitelist:
+  - 203.0.113.4
+  - 10.0.0.0/24
+  - 192.168.1.10-192.168.1.40
+blacklist:
+  - 198.51.100.0/24
+
 # Firewall enforcement.
 #   mode: internal | external
 #     internal  pure-Go nftables over netlink — no external binaries needed

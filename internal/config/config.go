@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"code.sadeq.uk/simple-blocker/internal/ipmatch"
 	"gopkg.in/yaml.v3"
 )
 
@@ -32,6 +33,11 @@ type Config struct {
 	// ControlSocket is the unix socket the daemon serves live status on, and
 	// that the `status` command reads. Defaults to /run/simple-blocker.sock.
 	ControlSocket string `yaml:"control_socket" json:"control_socket"`
+	// Whitelist holds addresses the daemon must never ban. Blacklist holds
+	// addresses banned permanently when they trip a pattern. Whitelist wins.
+	// Each entry is a single IP, an inclusive range "FROM-TO", or a CIDR block.
+	Whitelist []string `yaml:"whitelist" json:"whitelist"`
+	Blacklist []string `yaml:"blacklist" json:"blacklist"`
 }
 
 // Firewall configures the enforcement backend.
@@ -219,8 +225,26 @@ func (c *Config) applyDefaults() {
 	})
 }
 
+// IPLists compiles the whitelist and blacklist into matchers. Parse errors are
+// wrapped so the offending entry is named. The returned lists are never nil
+// (an empty list matches nothing), so callers need not nil-check them.
+func (c *Config) IPLists() (white, black *ipmatch.List, err error) {
+	white, err = ipmatch.New(c.Whitelist)
+	if err != nil {
+		return nil, nil, fmt.Errorf("whitelist: %w", err)
+	}
+	black, err = ipmatch.New(c.Blacklist)
+	if err != nil {
+		return nil, nil, fmt.Errorf("blacklist: %w", err)
+	}
+	return white, black, nil
+}
+
 // Validate checks that the configuration is internally consistent.
 func (c *Config) Validate() error {
+	if _, _, err := c.IPLists(); err != nil {
+		return err
+	}
 	switch c.Firewall.Mode {
 	case "internal", "external":
 	default:
