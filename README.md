@@ -159,15 +159,28 @@ Durations use Go syntax (`10m`, `3h`, `24h`). Every source `pattern` must
 contain a capturing group for the address — name it `(?P<ip>...)`; an unnamed
 first group is accepted as a fallback.
 
+### Source mode: internal vs external
+
+Each source has a `mode`:
+
+- **docker** — `internal` (default) reads container logs straight from the
+  **Docker Engine API over the unix socket** (`/var/run/docker.sock`, override
+  with `docker_host`) using only the Go standard library — no `docker` CLI
+  needed. `external` shells out to `docker logs -f`.
+- **journal** — always `external` (`journalctl`); `internal` is rejected.
+
+Override docker sources at runtime with `-docker-mode internal|external`.
+
 ### Adding a source
 
 Append another entry under `sources`. For example, to ban IPs probing for
-`.php`/`.env` files in an nginx container:
+`.php`/`.env` files in an nginx container (internal docker mode, the default):
 
 ```yaml
   - type: docker
     name: nginx
     target: my-nginx-1
+    mode: internal   # or external to use the docker CLI
     pattern: '(?P<ip>\d{1,3}(?:\.\d{1,3}){3})\s.*?"[A-Z]+\s+\S*\.(?:php|env|xml)\S*\s+HTTP/\d\.\d".*\s404\s'
 ```
 
@@ -215,8 +228,8 @@ implement either to add a backend or a log source.
 
 - Linux with systemd
 - Go (build-time only; the binary is static, `CGO_ENABLED=0`)
-- One firewall backend: `ipset` + `iptables`, or `nftables`
-- `docker` CLI (only if using `docker` sources)
+- A firewall: a kernel with nftables (internal mode), or `ipset`+`iptables` / `nftables` tools (external mode)
+- `docker` CLI only for `docker` sources in `external` mode (internal mode uses the API socket directly)
 
 ## License
 

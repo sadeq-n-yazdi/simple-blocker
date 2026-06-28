@@ -125,6 +125,49 @@ func TestDurationForHighestTierWins(t *testing.T) {
 	}
 }
 
+func TestSourceModeDefaults(t *testing.T) {
+	js := []byte(`{
+		"ban_schedule": [{"offenses": 1, "ban": "5m"}],
+		"sources": [
+			{"type": "docker", "target": "c", "pattern": "(?P<ip>x)"},
+			{"type": "journal", "target": "ssh", "pattern": "(?P<ip>x)"}
+		]
+	}`)
+	cfg, err := Parse(js, ".json")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Sources[0].Mode != "internal" {
+		t.Errorf("docker default mode = %q, want internal", cfg.Sources[0].Mode)
+	}
+	if cfg.Sources[1].Mode != "external" {
+		t.Errorf("journal default mode = %q, want external", cfg.Sources[1].Mode)
+	}
+}
+
+func TestSourceModeValidation(t *testing.T) {
+	cases := map[string]string{
+		"journal internal": `{"ban_schedule":[{"offenses":1,"ban":"5m"}],"sources":[{"type":"journal","target":"ssh","mode":"internal","pattern":"(?P<ip>x)"}]}`,
+		"bad mode":         `{"ban_schedule":[{"offenses":1,"ban":"5m"}],"sources":[{"type":"docker","target":"c","mode":"sideways","pattern":"(?P<ip>x)"}]}`,
+	}
+	for name, doc := range cases {
+		if _, err := Parse([]byte(doc), ".json"); err == nil {
+			t.Errorf("%s: expected validation error", name)
+		}
+	}
+}
+
+func TestDockerHostRoundTrip(t *testing.T) {
+	js := []byte(`{"ban_schedule":[{"offenses":1,"ban":"5m"}],"sources":[{"type":"docker","target":"c","docker_host":"/run/docker.sock","pattern":"(?P<ip>x)"}]}`)
+	cfg, err := Parse(js, ".json")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Sources[0].DockerHost != "/run/docker.sock" {
+		t.Errorf("docker_host = %q", cfg.Sources[0].DockerHost)
+	}
+}
+
 func TestBadDuration(t *testing.T) {
 	if _, err := Parse([]byte(`{"window":"banana","ban_schedule":[{"offenses":1,"ban":"5m"}],"sources":[{"type":"docker","target":"c","pattern":"x"}]}`), ".json"); err == nil {
 		t.Fatal("expected error for bad duration")

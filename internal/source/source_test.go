@@ -47,6 +47,50 @@ func TestNewUnknownType(t *testing.T) {
 	}
 }
 
+func demuxOf(t *testing.T, s Source) frameMode {
+	t.Helper()
+	ss, ok := s.(*streamSource)
+	if !ok {
+		t.Fatalf("source is %T, not *streamSource", s)
+	}
+	return ss.demux
+}
+
+func TestNewDockerModeSelection(t *testing.T) {
+	// Internal (and default empty) docker → API source (autoFrame).
+	for _, mode := range []string{"internal", ""} {
+		s, err := New(config.Source{Type: "docker", Mode: mode, Target: "c", Pattern: "(?P<ip>x)"})
+		if err != nil {
+			t.Fatalf("docker mode %q: %v", mode, err)
+		}
+		if demuxOf(t, s) != autoFrame {
+			t.Errorf("docker mode %q: demux = %v, want autoFrame", mode, demuxOf(t, s))
+		}
+	}
+	// External docker → exec source (rawFrame).
+	s, err := New(config.Source{Type: "docker", Mode: "external", Target: "c", Pattern: "(?P<ip>x)"})
+	if err != nil {
+		t.Fatalf("docker external: %v", err)
+	}
+	if demuxOf(t, s) != rawFrame {
+		t.Errorf("docker external: demux = %v, want rawFrame", demuxOf(t, s))
+	}
+}
+
+func TestNewDockerBadMode(t *testing.T) {
+	_, err := New(config.Source{Type: "docker", Mode: "sideways", Target: "c", Pattern: "(?P<ip>x)"})
+	if err == nil {
+		t.Fatal("expected error for invalid docker mode")
+	}
+}
+
+func TestNewJournalInternalRejected(t *testing.T) {
+	_, err := New(config.Source{Type: "journal", Mode: "internal", Target: "ssh", Pattern: "(?P<ip>x)"})
+	if err == nil {
+		t.Fatal("expected error: journal does not support internal mode")
+	}
+}
+
 func TestPHPProbePattern(t *testing.T) {
 	// The example docker pattern should catch a 404 probe to a .php path.
 	pattern := `(?P<ip>\d{1,3}(?:\.\d{1,3}){3})\s.*?"[A-Z]+\s+\S*\.(?:php|exe|xml|gz)\S*\s+HTTP/\d\.\d".*\s404\s`

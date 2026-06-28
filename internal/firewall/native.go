@@ -95,7 +95,10 @@ func (f *native) dropExprs() []expr.Any {
 			Offset:        12,
 			Len:           4,
 		},
-		&expr.Lookup{SourceRegister: 1, SetName: f.set.Name, SetID: f.set.ID},
+		// A named set is identified by name within the table; SetID is for
+		// anonymous sets and is omitted here to avoid any ID mismatch on a set
+		// that already exists from a prior run.
+		&expr.Lookup{SourceRegister: 1, SetName: f.set.Name},
 		&expr.Verdict{Kind: expr.VerdictDrop},
 	}
 }

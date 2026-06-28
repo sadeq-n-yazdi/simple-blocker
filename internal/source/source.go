@@ -1,17 +1,20 @@
 // Package source tails log streams and reports offending IP addresses.
 //
-// Each Source wraps a long-running command (docker logs, journalctl) and
-// applies a regular expression to every line. New source types only need to
-// build a *exec.Cmd; the streaming, matching and retry logic is shared.
+// Each Source wraps a long-running byte stream (docker logs, journalctl, or the
+// Docker Engine API) and applies a regular expression to every line. New source
+// types only need to supply an opener; the streaming, matching and retry logic
+// is shared by streamSource.
 package source
 
 import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os/exec"
 	"regexp"
+	"sync"
 	"time"
 
 	"code.sadeq.uk/simple-blocker/internal/config"
@@ -29,8 +32,21 @@ type Source interface {
 	Run(ctx context.Context, report Reporter) error
 }
 
-// retryDelay is how long a source waits before restarting a failed command.
+// retryDelay is how long a source waits before restarting a failed stream.
 var retryDelay = 5 * time.Second
+
+// frameMode controls how a stream's bytes are framed.
+type frameMode int
+
+const (
+	rawFrame  frameMode = iota // plain text, no headers (exec sources, TTY containers)
+	muxFrame                   // always Docker stdcopy 8-byte headers
+	autoFrame                  // sniff the first bytes to decide (Docker API default)
+)
+
+// opener returns a fresh log byte stream bound to ctx. Closing the returned
+// ReadCloser (or cancelling ctx) must unblock any in-flight Read.
+type opener func(ctx context.Context) (io.ReadCloser, error)
 
 // New builds a Source from its configuration.
 func New(c config.Source) (Source, error) {
@@ -38,22 +54,40 @@ func New(c config.Source) (Source, error) {
 	if err != nil {
 		return nil, fmt.Errorf("source %q: %w", label(c), err)
 	}
-	cs := &cmdSource{name: label(c), re: re, ipIdx: ipIdx}
+	name := label(c)
+
 	switch c.Type {
 	case "docker":
-		target := c.Target
-		cs.build = func() *exec.Cmd {
-			return exec.Command("docker", "logs", "-f", "--tail", "100", target)
+		switch c.Mode {
+		case "internal", "": // internal is the docker default
+			sock := c.DockerHost
+			if sock == "" {
+				sock = defaultDockerSocket
+			}
+			return newDockerAPISource(name, sock, c.Target, re, ipIdx), nil
+		case "external":
+			target := c.Target
+			build := func() *exec.Cmd {
+				return exec.Command("docker", "logs", "-f", "--tail", "100", target)
+			}
+			return &streamSource{name: name, re: re, ipIdx: ipIdx, open: cmdOpener(build), demux: rawFrame}, nil
+		default:
+			return nil, fmt.Errorf("source %q: invalid mode %q for docker (use internal or external)", name, c.Mode)
 		}
 	case "journal":
+		// journal is exec-only; internal is rejected at config.Validate, but
+		// guard here too for direct New callers.
+		if c.Mode == "internal" {
+			return nil, fmt.Errorf("source %q: journal does not support internal mode", name)
+		}
 		target, since := c.Target, c.Since
-		cs.build = func() *exec.Cmd {
+		build := func() *exec.Cmd {
 			return exec.Command("stdbuf", "-oL", "journalctl", "-af", "--since="+since, "-u", target)
 		}
+		return &streamSource{name: name, re: re, ipIdx: ipIdx, open: cmdOpener(build), demux: rawFrame}, nil
 	default:
-		return nil, fmt.Errorf("source %q: unknown type %q", label(c), c.Type)
+		return nil, fmt.Errorf("source %q: unknown type %q", name, c.Type)
 	}
-	return cs, nil
 }
 
 func label(c config.Source) string {
@@ -82,17 +116,19 @@ func compilePattern(pattern string) (*regexp.Regexp, int, error) {
 	return re, idx, nil
 }
 
-// cmdSource tails the output of a rebuilt command, matching each line.
-type cmdSource struct {
+// streamSource owns the shared scan/match/retry/cancel logic. Concrete sources
+// supply an opener and a frameMode.
+type streamSource struct {
 	name  string
 	re    *regexp.Regexp
 	ipIdx int
-	build func() *exec.Cmd
+	open  opener
+	demux frameMode
 }
 
-func (s *cmdSource) Name() string { return s.name }
+func (s *streamSource) Name() string { return s.name }
 
-func (s *cmdSource) Run(ctx context.Context, report Reporter) error {
+func (s *streamSource) Run(ctx context.Context, report Reporter) error {
 	for ctx.Err() == nil {
 		if err := s.stream(ctx, report); err != nil && ctx.Err() == nil {
 			slog.Error("source failed, retrying", "source", s.name, "err", err, "in", retryDelay)
@@ -105,42 +141,80 @@ func (s *cmdSource) Run(ctx context.Context, report Reporter) error {
 	return ctx.Err()
 }
 
-// stream runs one instance of the command, scanning until it exits or ctx is
-// cancelled.
-func (s *cmdSource) stream(ctx context.Context, report Reporter) error {
-	cmd := s.build()
-	stdout, err := cmd.StdoutPipe()
+// stream opens one instance of the byte stream and scans it until it ends or
+// ctx is cancelled.
+func (s *streamSource) stream(ctx context.Context, report Reporter) error {
+	rc, err := s.open(ctx)
 	if err != nil {
 		return err
 	}
-	cmd.Stderr = nil
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	// Ensure the child is killed when ctx is cancelled so Wait returns.
+	defer rc.Close()
+
+	// Closing the stream on cancel unblocks a blocked Read so the scan returns.
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
 		select {
 		case <-ctx.Done():
-			_ = cmd.Process.Kill()
+			_ = rc.Close()
 		case <-done:
 		}
 	}()
 
-	scanner := bufio.NewScanner(stdout)
+	br := bufio.NewReaderSize(rc, 64*1024)
+	var r io.Reader = br
+	if s.demux == muxFrame || (s.demux == autoFrame && needsDemux(br)) {
+		r = newStdDemuxReader(br)
+	}
+
+	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		if m := s.re.FindStringSubmatch(scanner.Text()); m != nil && s.ipIdx < len(m) {
 			report(m[s.ipIdx], s.name)
 		}
 	}
-	werr := cmd.Wait()
 	if ctx.Err() != nil {
-		return nil // expected: we killed it
+		return nil // expected: we closed the stream
 	}
-	if serr := scanner.Err(); serr != nil {
-		return serr
+	return scanner.Err()
+}
+
+// cmdStream wraps a running command as an io.ReadCloser whose Close kills the
+// process and waits for it to reap. Close is idempotent: stream() may call it
+// from both its cancel goroutine and its defer, but cmd.Wait must run once.
+type cmdStream struct {
+	cmd    *exec.Cmd
+	stdout io.ReadCloser
+	once   sync.Once
+	werr   error
+}
+
+func (c *cmdStream) Read(p []byte) (int, error) { return c.stdout.Read(p) }
+
+func (c *cmdStream) Close() error {
+	c.once.Do(func() {
+		if c.cmd.Process != nil {
+			_ = c.cmd.Process.Kill()
+		}
+		_ = c.stdout.Close()
+		c.werr = c.cmd.Wait()
+	})
+	return c.werr
+}
+
+// cmdOpener builds an opener that runs a command and streams its stdout.
+func cmdOpener(build func() *exec.Cmd) opener {
+	return func(ctx context.Context) (io.ReadCloser, error) {
+		cmd := build()
+		cmd.Stderr = nil
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return nil, err
+		}
+		if err := cmd.Start(); err != nil {
+			return nil, err
+		}
+		return &cmdStream{cmd: cmd, stdout: stdout}, nil
 	}
-	return werr
 }
