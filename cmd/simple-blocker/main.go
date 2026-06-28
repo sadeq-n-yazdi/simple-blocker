@@ -29,9 +29,15 @@ var (
 	date    = ""
 )
 
+// overrides holds CLI flags that take precedence over the config file when set.
+type overrides struct {
+	firewallMode string
+}
+
 func main() {
 	configPath := flag.String("config", "/etc/simple-blocker/config.yaml", "path to the config file (.yaml, .yml or .json)")
 	showVersion := flag.Bool("version", false, "print version information and exit")
+	firewallMode := flag.String("firewall-mode", "", "override firewall.mode: internal or external")
 	flag.Parse()
 
 	// Support both `simple-blocker version` and `-version`.
@@ -43,7 +49,7 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	slog.Info("simple-blocker", "version", version, "commit", buildCommit(), "date", buildDate())
 
-	if err := run(*configPath); err != nil {
+	if err := run(*configPath, overrides{firewallMode: *firewallMode}); err != nil {
 		slog.Error("fatal", "err", err)
 		os.Exit(1)
 	}
@@ -100,13 +106,19 @@ func buildDate() string {
 	return "unknown"
 }
 
-func run(configPath string) error {
+func run(configPath string, ov overrides) error {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err
 	}
+	if ov.firewallMode != "" {
+		cfg.Firewall.Mode = ov.firewallMode
+		if err := cfg.Validate(); err != nil {
+			return err
+		}
+	}
 
-	fw, err := firewall.New(cfg.Firewall.Backend, firewall.Config{
+	fw, err := firewall.New(cfg.Firewall.Mode, cfg.Firewall.Backend, firewall.Config{
 		SetName: cfg.IPSetName,
 		Chains:  cfg.Firewall.Chains,
 	})
@@ -123,8 +135,8 @@ func run(configPath string) error {
 		sources = append(sources, s)
 	}
 
-	slog.Info("starting", "backend", fw.Name(), "set", cfg.IPSetName,
-		"window", cfg.Window, "sources", len(sources))
+	slog.Info("starting", "firewall", fw.Name(), "mode", cfg.Firewall.Mode,
+		"set", cfg.IPSetName, "window", cfg.Window, "sources", len(sources))
 	if err := fw.Setup(); err != nil {
 		return err
 	}

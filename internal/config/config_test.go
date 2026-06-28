@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -59,6 +60,22 @@ func TestParseJSONEquivalentToYAML(t *testing.T) {
 	}
 	if cfg.Firewall.Backend != "auto" {
 		t.Errorf("default backend = %q", cfg.Firewall.Backend)
+	}
+	if cfg.Firewall.Mode != "internal" {
+		t.Errorf("default firewall mode = %q, want internal", cfg.Firewall.Mode)
+	}
+}
+
+func TestFirewallModeValidation(t *testing.T) {
+	base := `{"firewall":{"mode":%q},"ban_schedule":[{"offenses":1,"ban":"5m"}],"sources":[{"type":"docker","target":"c","pattern":"(?P<ip>x)"}]}`
+	if _, err := Parse([]byte(`{"firewall":{"mode":"sideways"},"ban_schedule":[{"offenses":1,"ban":"5m"}],"sources":[{"type":"docker","target":"c","pattern":"x"}]}`), ".json"); err == nil {
+		t.Fatal("expected error for invalid firewall.mode")
+	}
+	for _, mode := range []string{"internal", "external"} {
+		doc := []byte(fmt.Sprintf(base, mode))
+		if _, err := Parse(doc, ".json"); err != nil {
+			t.Errorf("mode %q should be valid: %v", mode, err)
+		}
 	}
 }
 

@@ -60,11 +60,12 @@ nfpms:
       - deb
       - rpm
     bindir: /usr/bin
-    # A firewall backend is required at runtime; the binary auto-detects which
-    # is present. Default to nftables; iptables+ipset are an alternative.
-    dependencies:
-      - nftables
+    # The default "internal" firewall mode talks to nftables over netlink and
+    # needs no userspace firewall binary — only a kernel with nftables. The
+    # tools below are recommended: `nft` for inspection, and ipset+iptables for
+    # the optional "external" mode.
     recommends:
+      - nftables
       - ipset
       - iptables
     contents:

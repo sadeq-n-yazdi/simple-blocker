@@ -79,7 +79,30 @@ func TestNFTablesBanRefreshesElement(t *testing.T) {
 }
 
 func TestNewUnknownBackend(t *testing.T) {
-	if _, err := New("pf", Config{}); err == nil {
+	if _, err := New("external", "pf", Config{}); err == nil {
 		t.Fatal("expected error for unknown backend")
+	}
+}
+
+func TestNewUnknownMode(t *testing.T) {
+	if _, err := New("sideways", "auto", Config{}); err == nil {
+		t.Fatal("expected error for unknown mode")
+	}
+}
+
+func TestNewExternalSelectsBackend(t *testing.T) {
+	fw, err := New("external", "nftables", Config{SetName: "bl"})
+	if err != nil {
+		t.Fatalf("New external/nftables: %v", err)
+	}
+	if fw.Name() != "nftables" {
+		t.Errorf("Name = %q, want nftables", fw.Name())
+	}
+	fw, err = New("external", "iptables", Config{SetName: "bl", Chains: []string{"INPUT"}})
+	if err != nil {
+		t.Fatalf("New external/iptables: %v", err)
+	}
+	if fw.Name() != "iptables" {
+		t.Errorf("Name = %q, want iptables", fw.Name())
 	}
 }
