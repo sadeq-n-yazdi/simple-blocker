@@ -62,6 +62,15 @@ func TestParseNFTSetJSON(t *testing.T) {
 	}
 }
 
+func TestParseNFTSetJSONUnexpectedElement(t *testing.T) {
+	// An element that is neither a bare string nor the {elem:{val}} object must
+	// produce an error instead of being silently dropped.
+	out := `{"nftables":[{"set":{"name":"x","elem":[{"weird":true}]}}]}`
+	if _, err := parseNFTSetJSON(out); err == nil {
+		t.Fatal("expected error for unrecognized element format")
+	}
+}
+
 func TestParseNFTSetJSONEmpty(t *testing.T) {
 	out := `{"nftables":[{"set":{"name":"x"}}]}`
 	got, err := parseNFTSetJSON(out)

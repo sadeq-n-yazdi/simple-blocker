@@ -111,7 +111,11 @@ func parseNFTSetJSON(out string) ([]BanEntry, error) {
 					IP:      wrap.Elem.Val,
 					Expires: time.Duration(wrap.Elem.Expires) * time.Second,
 				})
+				continue
 			}
+			// Neither shape matched: fail loudly rather than under-report bans
+			// (a silent skip would make status show fewer IPs than exist).
+			return nil, fmt.Errorf("nft list: unexpected element format: %s", string(el))
 		}
 	}
 	return entries, nil
