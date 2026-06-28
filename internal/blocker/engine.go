@@ -48,6 +48,12 @@ func (e *Engine) SetLists(white, black *ipmatch.List) {
 // other IP follows the escalating schedule. It is safe for concurrent use and
 // is the callback handed to sources.
 func (e *Engine) Report(ip, src string) {
+	// Normalize IPv4-mapped IPv6 (e.g. ::ffff:1.2.3.4) to plain IPv4 so the
+	// tracker doesn't count it as a distinct offender and the backends receive
+	// a syntax they accept.
+	if addr, err := netip.ParseAddr(ip); err == nil {
+		ip = addr.Unmap().String()
+	}
 	ls := e.lists.Load()
 	if ls.white.Contains(ip) {
 		slog.Debug("whitelisted, not banning", "ip", ip, "source", src)

@@ -167,3 +167,27 @@ func TestEngineSkipsIPv6Enforcement(t *testing.T) {
 		t.Fatalf("v6 target should be skipped, not banned: %+v", fb.bans)
 	}
 }
+
+func TestEngineNormalizesV4MappedV6(t *testing.T) {
+	fb := &fakeBanner{}
+	// Blacklist the plain IPv4 form; report the v4-in-v6 form.
+	e := NewEngine(NewTracker(time.Hour, schedule()), fb, mustList(t), mustList(t, "1.2.3.4"))
+	e.Report("::ffff:1.2.3.4", "ssh")
+	if len(fb.bans) != 1 {
+		t.Fatalf("expected one ban for the normalized address, got %+v", fb.bans)
+	}
+	if fb.bans[0].ip != "1.2.3.4" {
+		t.Fatalf("expected ban on normalized 1.2.3.4, got %q", fb.bans[0].ip)
+	}
+
+	// The tracker must treat both spellings as the same offender: two reports
+	// of an unlisted address (one of each form) reach the count-2 ban tier.
+	fb2 := &fakeBanner{}
+	w, b := emptyLists()
+	e2 := NewEngine(NewTracker(time.Hour, schedule()), fb2, w, b)
+	e2.Report("5.6.7.8", "ssh")        // count 1
+	e2.Report("::ffff:5.6.7.8", "ssh") // same offender → count 2 → 10m ban
+	if len(fb2.bans) != 1 || fb2.bans[0].ip != "5.6.7.8" || fb2.bans[0].d != 10*time.Minute {
+		t.Fatalf("expected the two spellings to share an offense count, got %+v", fb2.bans)
+	}
+}

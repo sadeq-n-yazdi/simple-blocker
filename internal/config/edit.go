@@ -246,6 +246,12 @@ func writeFileAtomic(path string, data []byte) error {
 		tmp.Close()
 		return err
 	}
+	// Flush to stable storage before the rename so a crash can't leave a
+	// renamed-but-empty config behind.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}

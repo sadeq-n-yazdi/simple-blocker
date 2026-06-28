@@ -130,8 +130,7 @@ func (f *native) Unban(ip string) error {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	set := f.set
-	if set == nil {
+	if f.set == nil {
 		s, err := f.conn.GetSetByName(
 			&nftables.Table{Family: nftables.TableFamilyINet, Name: nftTable},
 			f.setName,
@@ -139,9 +138,10 @@ func (f *native) Unban(ip string) error {
 		if err != nil {
 			return fmt.Errorf("nftables: get set %q: %w", f.setName, err)
 		}
-		set = s
+		// Cache so a liftLiveBans loop doesn't re-query the set per call.
+		f.set = s
 	}
-	if err := f.conn.SetDeleteElements(set, []nftables.SetElement{
+	if err := f.conn.SetDeleteElements(f.set, []nftables.SetElement{
 		{Key: addr.To4()},
 	}); err != nil {
 		return fmt.Errorf("nftables: delete element: %w", err)
