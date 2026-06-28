@@ -132,3 +132,42 @@ func TestJSONRoundTrip(t *testing.T) {
 		t.Errorf("blacklist = %v", cfg.Blacklist)
 	}
 }
+
+func TestEditPreservesSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.yaml")
+	if err := os.WriteFile(target, []byte(yamlFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "config.yaml")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := AddListEntry(link, "whitelist", "192.168.0.0/24"); err != nil {
+		t.Fatalf("AddListEntry through symlink: %v", err)
+	}
+
+	// The symlink must survive the atomic write...
+	fi, err := os.Lstat(link)
+	if err != nil {
+		t.Fatalf("lstat link: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("symlink was replaced with a regular file")
+	}
+	// ...and the edit must have landed in the real target.
+	cfg, err := Load(link)
+	if err != nil {
+		t.Fatalf("reload via symlink: %v", err)
+	}
+	found := false
+	for _, e := range cfg.Whitelist {
+		if e == "192.168.0.0/24" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("new entry not written to symlink target: %v", cfg.Whitelist)
+	}
+}

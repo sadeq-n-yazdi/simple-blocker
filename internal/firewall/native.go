@@ -4,6 +4,7 @@ package firewall
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -146,7 +147,15 @@ func (f *native) Unban(ip string) error {
 	}); err != nil {
 		return fmt.Errorf("nftables: delete element: %w", err)
 	}
-	return f.conn.Flush()
+	if err := f.conn.Flush(); err != nil {
+		// Deleting an absent element surfaces here as ENOENT; the Unban
+		// contract is a no-op in that case, matching the other backends.
+		if errors.Is(err, unix.ENOENT) {
+			return nil
+		}
+		return fmt.Errorf("nftables: flush: %w", err)
+	}
+	return nil
 }
 
 // List reads the set's elements over netlink. It works without a prior Setup

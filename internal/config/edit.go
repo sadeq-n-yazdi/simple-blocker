@@ -231,6 +231,12 @@ func jsonEdit(data []byte, list, spec string, add bool) (out []byte, changed boo
 // writeFileAtomic writes data to path via a temp file + rename, preserving the
 // existing file's mode.
 func writeFileAtomic(path string, data []byte) error {
+	// If path is a symlink (common with managed configs / container mounts),
+	// write through to its target so the rename preserves the link instead of
+	// replacing it with a regular file.
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
 	dir := filepath.Dir(path)
 	mode := os.FileMode(0o644)
 	if fi, err := os.Stat(path); err == nil {
