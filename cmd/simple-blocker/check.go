@@ -26,6 +26,7 @@ const (
 // action the daemon would take, simulated against the ban schedule.
 func cmdCheck(args []string) error {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stdout, checkHelp) }
 	configPath := fs.String("config", defaultConfigPath, "path to the config file")
 	follow := fs.Bool("follow", false, "stream logs live instead of reading recent history")
 	srcName := fs.String("source", "", "only check the named source (default: all)")

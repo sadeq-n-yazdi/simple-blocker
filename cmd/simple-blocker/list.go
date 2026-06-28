@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"time"
 
 	"code.sadeq.uk/simple-blocker/internal/config"
@@ -16,8 +18,24 @@ import (
 // its file watcher within a couple of seconds. On removal (and on whitelist
 // add) it also lifts any matching live bans from the firewall set.
 func cmdList(list string, args []string) error {
+	// Handle help in the positional slots before the dispatch consumes them —
+	// otherwise `whitelist -h` would be read as an unknown action and
+	// `whitelist add -h` would try to add "-h" as a list entry. Only the
+	// positionals are checked (action, then the spec for add/remove); a help
+	// flag among the trailing flags is left to the flag parser, so a value like
+	// `-config help` is not mistaken for a help request.
 	if len(args) == 0 {
-		return fmt.Errorf("usage: simple-blocker %s add|remove <ip|range|cidr> | show", list)
+		// A bare management command shows full help rather than a terse error.
+		fmt.Print(listHelp(list))
+		return nil
+	}
+	if isHelpArg(args[0]) {
+		fmt.Print(listHelp(list))
+		return nil
+	}
+	if (args[0] == "add" || args[0] == "remove") && len(args) > 1 && isHelpArg(args[1]) {
+		fmt.Print(listHelp(list))
+		return nil
 	}
 	action := args[0]
 	rest := args[1:]
@@ -34,8 +52,12 @@ func cmdList(list string, args []string) error {
 	}
 
 	fs := flag.NewFlagSet(list, flag.ContinueOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stdout, listHelp(list)) }
 	configPath := fs.String("config", defaultConfigPath, "path to the config file")
 	if err := fs.Parse(flagArgs); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil // -h after the spec already printed help
+		}
 		return err
 	}
 
