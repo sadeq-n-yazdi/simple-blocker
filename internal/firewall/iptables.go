@@ -1,8 +1,11 @@
 package firewall
 
 import (
+	"bufio"
+	"context"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -45,6 +48,45 @@ func (f *ipTables) Setup() error {
 func (f *ipTables) Ban(ip string, d time.Duration) error {
 	secs := strconv.Itoa(int(d.Seconds()))
 	return run("ipset", "add", "-exist", f.set, ip, "timeout", secs)
+}
+
+// List parses `ipset list <set>`. Members appear after a "Members:" line, one
+// per line as "<ip>" optionally followed by "timeout <remaining-seconds>".
+func (f *ipTables) List(ctx context.Context) ([]BanEntry, error) {
+	out, err := listRunner(ctx, "ipset", "list", f.set)
+	if err != nil {
+		return nil, err
+	}
+	return parseIPSetList(out), nil
+}
+
+func parseIPSetList(out string) []BanEntry {
+	var entries []BanEntry
+	sc := bufio.NewScanner(strings.NewReader(out))
+	inMembers := false
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if !inMembers {
+			if line == "Members:" {
+				inMembers = true
+			}
+			continue
+		}
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		e := BanEntry{IP: fields[0]}
+		for i := 1; i+1 < len(fields); i++ {
+			if fields[i] == "timeout" {
+				if secs, err := strconv.Atoi(fields[i+1]); err == nil {
+					e.Expires = time.Duration(secs) * time.Second
+				}
+			}
+		}
+		entries = append(entries, e)
+	}
+	return entries
 }
 
 func (f *ipTables) Teardown() error {

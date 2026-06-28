@@ -17,9 +17,40 @@ import (
 
 	"code.sadeq.uk/simple-blocker/internal/blocker"
 	"code.sadeq.uk/simple-blocker/internal/config"
+	"code.sadeq.uk/simple-blocker/internal/control"
 	"code.sadeq.uk/simple-blocker/internal/firewall"
 	"code.sadeq.uk/simple-blocker/internal/source"
 )
+
+// buildSnapshot assembles the daemon's control-socket snapshot from the live
+// firewall set and the offense tracker.
+func buildSnapshot(ctx context.Context, fw firewall.Firewall, tracker *blocker.Tracker) (control.Snapshot, error) {
+	bans, err := fw.List(ctx)
+	if err != nil {
+		return control.Snapshot{}, err
+	}
+	// Start from empty (non-nil) slices so the JSON has [] rather than null.
+	snap := control.Snapshot{
+		Backend:   fw.Name(),
+		Bans:      []control.Ban{},
+		Offenders: []control.Offender{},
+		TS:        time.Now().UTC().Format(time.RFC3339),
+	}
+	for _, b := range bans {
+		snap.Bans = append(snap.Bans, control.Ban{
+			IP:             b.IP,
+			ExpiresSeconds: int64(b.Expires.Seconds()),
+		})
+	}
+	for _, o := range tracker.Snapshot() {
+		snap.Offenders = append(snap.Offenders, control.Offender{
+			IP:              o.IP,
+			Count:           o.Count,
+			WouldBanSeconds: int64(o.WouldBan.Seconds()),
+		})
+	}
+	return snap, nil
+}
 
 // Build metadata, overridden at link time with -X main.version=... etc.
 // When built without ldflags, commit/date fall back to the Go VCS stamp.
@@ -29,21 +60,51 @@ var (
 	date    = ""
 )
 
+// defaultConfigPath is used by every subcommand's -config flag.
+const defaultConfigPath = "/etc/simple-blocker/config.yaml"
+
 // overrides holds CLI flags that take precedence over the config file when set.
 type overrides struct {
-	firewallMode string
-	dockerMode   string
+	firewallMode  string
+	dockerMode    string
+	controlSocket string
 }
 
 func main() {
-	configPath := flag.String("config", "/etc/simple-blocker/config.yaml", "path to the config file (.yaml, .yml or .json)")
-	showVersion := flag.Bool("version", false, "print version information and exit")
-	firewallMode := flag.String("firewall-mode", "", "override firewall.mode: internal or external")
-	dockerMode := flag.String("docker-mode", "", "override mode for all docker sources: internal or external")
-	flag.Parse()
+	// Dispatch subcommands on the first argument; anything else (including a
+	// leading flag) runs the daemon.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "version":
+			fmt.Println(versionString())
+			return
+		case "status":
+			if err := cmdStatus(os.Args[2:]); err != nil {
+				fmt.Fprintln(os.Stderr, "error:", err)
+				os.Exit(1)
+			}
+			return
+		case "check":
+			if err := cmdCheck(os.Args[2:]); err != nil {
+				fmt.Fprintln(os.Stderr, "error:", err)
+				os.Exit(1)
+			}
+			return
+		}
+	}
+	runDaemon()
+}
 
-	// Support both `simple-blocker version` and `-version`.
-	if *showVersion || flag.Arg(0) == "version" {
+func runDaemon() {
+	fs := flag.NewFlagSet("simple-blocker", flag.ExitOnError)
+	configPath := fs.String("config", defaultConfigPath, "path to the config file (.yaml, .yml or .json)")
+	showVersion := fs.Bool("version", false, "print version information and exit")
+	firewallMode := fs.String("firewall-mode", "", "override firewall.mode: internal or external")
+	dockerMode := fs.String("docker-mode", "", "override mode for all docker sources: internal or external")
+	controlSocket := fs.String("control-socket", "", "override control_socket path")
+	_ = fs.Parse(os.Args[1:])
+
+	if *showVersion {
 		fmt.Println(versionString())
 		return
 	}
@@ -51,7 +112,11 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	slog.Info("simple-blocker", "version", version, "commit", buildCommit(), "date", buildDate())
 
-	if err := run(*configPath, overrides{firewallMode: *firewallMode, dockerMode: *dockerMode}); err != nil {
+	if err := run(*configPath, overrides{
+		firewallMode:  *firewallMode,
+		dockerMode:    *dockerMode,
+		controlSocket: *controlSocket,
+	}); err != nil {
 		slog.Error("fatal", "err", err)
 		os.Exit(1)
 	}
@@ -127,6 +192,9 @@ func run(configPath string, ov overrides) error {
 		}
 		applied = true
 	}
+	if ov.controlSocket != "" {
+		cfg.ControlSocket = ov.controlSocket
+	}
 	if applied {
 		if err := cfg.Validate(); err != nil {
 			return err
@@ -163,10 +231,21 @@ func run(configPath string, ov overrides) error {
 		}
 	}()
 
-	engine := blocker.NewEngine(blocker.NewTracker(cfg.Window.Duration(), cfg.BanSchedule), fw)
+	tracker := blocker.NewTracker(cfg.Window.Duration(), cfg.BanSchedule)
+	engine := blocker.NewEngine(tracker, fw)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Serve live status on the control socket (read-only) for the `status`
+	// command. Failure to listen is non-fatal — the daemon still bans.
+	go func() {
+		if err := control.Serve(ctx, cfg.ControlSocket, func(ctx context.Context) (control.Snapshot, error) {
+			return buildSnapshot(ctx, fw, tracker)
+		}); err != nil {
+			slog.Warn("control socket unavailable", "err", err)
+		}
+	}()
 
 	var wg sync.WaitGroup
 	for _, s := range sources {

@@ -175,7 +175,7 @@ func TestStreamSourceEndToEndDemux(t *testing.T) {
 	}
 
 	var got []string
-	err := s.stream(context.Background(), func(ip, _ string) { got = append(got, ip) })
+	err := s.stream(context.Background(), func(line string, a, b int) { got = append(got, line[a:b]) })
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -209,12 +209,12 @@ func TestDockerLogsOpenerOverSocket(t *testing.T) {
 	defer srv.Close()
 
 	re := regexp.MustCompile(`from (?P<ip>\d{1,3}(?:\.\d{1,3}){3})`)
-	s := newDockerAPISource("web", sock, "web", re, 1)
+	s := newDockerAPISource("web", sock, "web", re, 1, true)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	var got []string
-	if err := s.stream(ctx, func(ip, _ string) { got = append(got, ip) }); err != nil {
+	if err := s.stream(ctx, func(line string, a, b int) { got = append(got, line[a:b]) }); err != nil {
 		t.Fatalf("stream: %v", err)
 	}
 	if len(got) != 1 || got[0] != "172.16.0.9" {
@@ -236,7 +236,7 @@ func TestDockerLogsOpenerNon200(t *testing.T) {
 	go srv.Serve(ln)
 	defer srv.Close()
 
-	open := dockerLogsOpener(newSocketClient(sock), "missing")
+	open := dockerLogsOpener(newSocketClient(sock), "missing", false)
 	if _, err := open(context.Background()); err == nil {
 		t.Fatal("expected error for 404 response")
 	}
@@ -255,7 +255,7 @@ func TestStreamSourceRawMode(t *testing.T) {
 		demux: rawFrame,
 	}
 	var got []string
-	if err := s.stream(context.Background(), func(ip, _ string) { got = append(got, ip) }); err != nil {
+	if err := s.stream(context.Background(), func(line string, a, b int) { got = append(got, line[a:b]) }); err != nil {
 		t.Fatalf("stream: %v", err)
 	}
 	if len(got) != 1 || got[0] != "9.9.9.9" {

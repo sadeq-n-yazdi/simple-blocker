@@ -3,6 +3,7 @@
 package firewall
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -120,6 +121,43 @@ func (f *native) Ban(ip string, d time.Duration) error {
 		return fmt.Errorf("nftables: add element: %w", err)
 	}
 	return f.conn.Flush()
+}
+
+// List reads the set's elements over netlink. It works without a prior Setup
+// by resolving the set by name, so a standalone "status" can read live bans.
+func (f *native) List(ctx context.Context) ([]BanEntry, error) {
+	// The google/nftables netlink calls below are synchronous and cannot be
+	// cancelled mid-flight, so honoring ctx is best-effort: we bail before
+	// starting if it is already done. In practice these local netlink reads
+	// return promptly.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	set := f.set
+	if set == nil {
+		s, err := f.conn.GetSetByName(
+			&nftables.Table{Family: nftables.TableFamilyINet, Name: nftTable},
+			f.setName,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("nftables: get set %q: %w", f.setName, err)
+		}
+		set = s
+	}
+	els, err := f.conn.GetSetElements(set)
+	if err != nil {
+		return nil, fmt.Errorf("nftables: get set elements: %w", err)
+	}
+	entries := make([]BanEntry, 0, len(els))
+	for _, el := range els {
+		entries = append(entries, BanEntry{
+			IP:      net.IP(el.Key).String(),
+			Expires: el.Expires,
+		})
+	}
+	return entries, nil
 }
 
 func (f *native) Teardown() error {

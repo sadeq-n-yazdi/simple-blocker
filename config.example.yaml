@@ -5,6 +5,10 @@
 # Name of the ipset / nftables set that holds banned addresses.
 ipset_name: simple_blacklist
 
+# Unix socket the daemon serves live status on (read-only), and that
+# `simple-blocker status` reads. Defaults to /run/simple-blocker.sock.
+control_socket: /run/simple-blocker.sock
+
 # Sliding window over which offenses are counted. Go duration syntax.
 window: 3h
 

@@ -1,5 +1,6 @@
 {
   "ipset_name": "simple_blacklist",
+  "control_socket": "/run/simple-blocker.sock",
   "window": "3h",
   "firewall": {
     "mode": "internal",

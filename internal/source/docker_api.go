@@ -19,12 +19,12 @@ const defaultDockerSocket = "/var/run/docker.sock"
 
 // newDockerAPISource streams a container's logs from the Docker Engine API over
 // the unix socket — pure Go, no docker CLI. It is the "internal" docker source.
-func newDockerAPISource(name, socketPath, target string, re *regexp.Regexp, ipIdx int) *streamSource {
+func newDockerAPISource(name, socketPath, target string, re *regexp.Regexp, ipIdx int, follow bool) *streamSource {
 	return &streamSource{
 		name:  name,
 		re:    re,
 		ipIdx: ipIdx,
-		open:  dockerLogsOpener(newSocketClient(socketPath), target),
+		open:  dockerLogsOpener(newSocketClient(socketPath), target, follow),
 		demux: autoFrame,
 	}
 }
@@ -52,10 +52,14 @@ func newSocketClient(socketPath string) *http.Client {
 // dockerLogsOpener streams GET /containers/<id>/logs?follow=1 from the daemon.
 // The "docker" host in the URL is a placeholder; the transport routes every
 // request to the unix socket.
-func dockerLogsOpener(client *http.Client, target string) opener {
+func dockerLogsOpener(client *http.Client, target string, follow bool) opener {
+	followN := 0
+	if follow {
+		followN = 1
+	}
 	return func(ctx context.Context) (io.ReadCloser, error) {
-		u := fmt.Sprintf("http://docker/containers/%s/logs?follow=1&stdout=1&stderr=1&tail=100",
-			url.PathEscape(target))
+		u := fmt.Sprintf("http://docker/containers/%s/logs?follow=%d&stdout=1&stderr=1&tail=100",
+			url.PathEscape(target), followN)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
 			return nil, err

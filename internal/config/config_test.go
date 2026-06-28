@@ -64,6 +64,9 @@ func TestParseJSONEquivalentToYAML(t *testing.T) {
 	if cfg.Firewall.Mode != "internal" {
 		t.Errorf("default firewall mode = %q, want internal", cfg.Firewall.Mode)
 	}
+	if cfg.ControlSocket != "/run/simple-blocker.sock" {
+		t.Errorf("default control_socket = %q", cfg.ControlSocket)
+	}
 }
 
 func TestFirewallModeValidation(t *testing.T) {

@@ -3,6 +3,7 @@
 package firewall
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -39,6 +40,23 @@ func TestNativeIntegration(t *testing.T) {
 	}
 	if err := fw.Ban("203.0.113.7", time.Minute); err != nil {
 		t.Fatalf("Ban: %v", err)
+	}
+	// List must see the banned IP with a positive remaining timeout.
+	entries, err := fw.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	var found bool
+	for _, e := range entries {
+		if e.IP == "203.0.113.7" {
+			found = true
+			if e.Expires <= 0 || e.Expires > time.Minute {
+				t.Errorf("unexpected expires for %s: %v", e.IP, e.Expires)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("List did not return the banned IP: %+v", entries)
 	}
 	if err := fw.Teardown(); err != nil {
 		t.Fatalf("Teardown: %v", err)

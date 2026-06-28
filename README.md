@@ -189,11 +189,49 @@ Append another entry under `sources`. For example, to ban IPs probing for
 ```sh
 systemctl status simple-blocker        # service health
 journalctl -u simple-blocker -f        # live logs (bans are logged here)
-
-# Inspect current bans:
-sudo ipset list simple_blacklist       # iptables backend
-sudo nft list set inet simple_blocker simple_blacklist   # nftables backend
 ```
+
+### `status` — see what's blocked
+
+```sh
+sudo simple-blocker status             # human table
+sudo simple-blocker status -json       # machine-readable
+```
+
+`status` shows the **currently-banned IPs** (with remaining time) and, when the
+daemon is running, its **offense tracker** plus the **diff** between them — most
+usefully any IP that is over the ban threshold but somehow *not* in the firewall
+set. It reads the daemon's read-only control socket
+(`control_socket`, default `/run/simple-blocker.sock`); if the daemon isn't
+running it falls back to reading the firewall set directly (needs root) and says
+so. You can still inspect the raw set yourself:
+
+```sh
+sudo ipset list simple_blacklist                          # iptables backend
+sudo nft list set inet simple_blocker simple_blacklist    # nftables backend
+```
+
+### `check` — dry-run the log matching
+
+```sh
+simple-blocker check                       # scan recent logs, then exit
+simple-blocker check -follow               # stream live until Ctrl-C
+simple-blocker check -source nginx         # only one source
+simple-blocker check -actions=false        # lines only, no action
+simple-blocker check -color never          # disable IP highlighting
+```
+
+`check` reads each configured source, prints every line that matches its
+pattern with the **captured IP highlighted**, and — on by default — the
+**action** the daemon would take, simulated against your real ban schedule
+(escalating offense counts, no actual bans):
+
+```
+[nginx] 45.9.1.2 … "GET /wp-login.php HTTP/1.1" 404 …
+    → offense #2 from 45.9.1.2 within 3h → would ban 10m
+```
+
+It bans nothing and needs no privileges — a pure diagnostic.
 
 On shutdown the service removes its drop rules but **keeps the ban set**, so
 in-flight bans persist across restarts.
