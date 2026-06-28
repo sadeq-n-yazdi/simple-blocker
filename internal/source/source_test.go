@@ -19,6 +19,26 @@ func TestCompilePatternNamedGroup(t *testing.T) {
 	}
 }
 
+func TestCompilePatternCapturesIPv6(t *testing.T) {
+	// A permissive dual-stack capture group catches both bare and bracketed
+	// IPv6 as well as IPv4; downstream parsing (netip) validates the token.
+	re, idx, err := compilePattern(`from \[?(?P<ip>[0-9a-fA-F:.]+)\]?`)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	cases := map[string]string{
+		"Invalid user admin from 2001:db8::1 port 22": "2001:db8::1",
+		"Invalid user admin from [2001:db8::1]:443":   "2001:db8::1",
+		"Invalid user admin from 10.0.0.5 port 22":    "10.0.0.5",
+	}
+	for line, want := range cases {
+		m := re.FindStringSubmatch(line)
+		if m == nil || m[idx] != want {
+			t.Errorf("line %q: got %v idx %d, want %q", line, m, idx, want)
+		}
+	}
+}
+
 func TestCompilePatternFallbackToFirstGroup(t *testing.T) {
 	// No named "ip" group: the first capturing group is used.
 	re, idx, err := compilePattern(`from (\d+\.\d+\.\d+\.\d+)`)

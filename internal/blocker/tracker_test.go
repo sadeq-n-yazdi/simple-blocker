@@ -104,7 +104,7 @@ func mustList(t *testing.T, specs ...string) *ipmatch.List {
 func TestEngineBansOnlyWhenScheduled(t *testing.T) {
 	fb := &fakeBanner{}
 	w, b := emptyLists()
-	e := NewEngine(NewTracker(time.Hour, schedule()), fb, w, b)
+	e := NewEngine(NewTracker(time.Hour, schedule()), fb, w, b, false)
 	e.Report("9.9.9.9", "ssh") // count 1: no ban
 	if len(fb.bans) != 0 {
 		t.Fatalf("expected no ban on first offense, got %d", len(fb.bans))
@@ -117,7 +117,7 @@ func TestEngineBansOnlyWhenScheduled(t *testing.T) {
 
 func TestEngineWhitelistNeverBans(t *testing.T) {
 	fb := &fakeBanner{}
-	e := NewEngine(NewTracker(time.Hour, schedule()), fb, mustList(t, "9.9.9.0/24"), mustList(t))
+	e := NewEngine(NewTracker(time.Hour, schedule()), fb, mustList(t, "9.9.9.0/24"), mustList(t), false)
 	for i := 0; i < 5; i++ {
 		e.Report("9.9.9.9", "ssh")
 	}
@@ -128,7 +128,7 @@ func TestEngineWhitelistNeverBans(t *testing.T) {
 
 func TestEngineBlacklistBansPermanently(t *testing.T) {
 	fb := &fakeBanner{}
-	e := NewEngine(NewTracker(time.Hour, schedule()), fb, mustList(t), mustList(t, "8.8.8.0/24"))
+	e := NewEngine(NewTracker(time.Hour, schedule()), fb, mustList(t), mustList(t, "8.8.8.0/24"), false)
 	e.Report("8.8.8.8", "ssh") // first sighting bans permanently
 	if len(fb.bans) != 1 || fb.bans[0].d != 0 {
 		t.Fatalf("expected one permanent (d=0) ban, got %+v", fb.bans)
@@ -137,7 +137,7 @@ func TestEngineBlacklistBansPermanently(t *testing.T) {
 
 func TestEngineWhitelistWinsOverBlacklist(t *testing.T) {
 	fb := &fakeBanner{}
-	e := NewEngine(NewTracker(time.Hour, schedule()), fb, mustList(t, "7.7.7.7"), mustList(t, "7.7.7.7"))
+	e := NewEngine(NewTracker(time.Hour, schedule()), fb, mustList(t, "7.7.7.7"), mustList(t, "7.7.7.7"), false)
 	e.Report("7.7.7.7", "ssh")
 	if len(fb.bans) != 0 {
 		t.Fatalf("whitelist should win over blacklist, got %+v", fb.bans)
@@ -147,7 +147,7 @@ func TestEngineWhitelistWinsOverBlacklist(t *testing.T) {
 func TestEngineSetListsSwap(t *testing.T) {
 	fb := &fakeBanner{}
 	w, b := emptyLists()
-	e := NewEngine(NewTracker(time.Hour, schedule()), fb, w, b)
+	e := NewEngine(NewTracker(time.Hour, schedule()), fb, w, b, false)
 	e.Report("6.6.6.6", "ssh") // not listed: count 1, no ban
 	if len(fb.bans) != 0 {
 		t.Fatalf("unexpected ban before swap: %+v", fb.bans)
@@ -159,19 +159,33 @@ func TestEngineSetListsSwap(t *testing.T) {
 	}
 }
 
-func TestEngineSkipsIPv6Enforcement(t *testing.T) {
+func TestEngineSkipsIPv6WhenEnforcementOff(t *testing.T) {
 	fb := &fakeBanner{}
-	e := NewEngine(NewTracker(time.Hour, schedule()), fb, mustList(t), mustList(t, "2001:db8::/32"))
-	e.Report("2001:db8::1", "ssh") // matches blacklist but can't be enforced
+	// enforceV6=false: a v6 blacklist match is skipped, not banned.
+	e := NewEngine(NewTracker(time.Hour, schedule()), fb, mustList(t), mustList(t, "2001:db8::/32"), false)
+	e.Report("2001:db8::1", "ssh")
 	if len(fb.bans) != 0 {
-		t.Fatalf("v6 target should be skipped, not banned: %+v", fb.bans)
+		t.Fatalf("v6 target should be skipped with enforcement off, got: %+v", fb.bans)
+	}
+}
+
+func TestEngineBansIPv6WhenEnforcementOn(t *testing.T) {
+	fb := &fakeBanner{}
+	// enforceV6=true: the same v6 blacklist match is enforced (permanent ban).
+	e := NewEngine(NewTracker(time.Hour, schedule()), fb, mustList(t), mustList(t, "2001:db8::/32"), true)
+	e.Report("2001:db8::1", "ssh")
+	if len(fb.bans) != 1 || fb.bans[0].d != 0 {
+		t.Fatalf("expected one permanent v6 ban with enforcement on, got: %+v", fb.bans)
+	}
+	if fb.bans[0].ip != "2001:db8::1" {
+		t.Fatalf("expected ban on 2001:db8::1, got %q", fb.bans[0].ip)
 	}
 }
 
 func TestEngineNormalizesV4MappedV6(t *testing.T) {
 	fb := &fakeBanner{}
 	// Blacklist the plain IPv4 form; report the v4-in-v6 form.
-	e := NewEngine(NewTracker(time.Hour, schedule()), fb, mustList(t), mustList(t, "1.2.3.4"))
+	e := NewEngine(NewTracker(time.Hour, schedule()), fb, mustList(t), mustList(t, "1.2.3.4"), false)
 	e.Report("::ffff:1.2.3.4", "ssh")
 	if len(fb.bans) != 1 {
 		t.Fatalf("expected one ban for the normalized address, got %+v", fb.bans)
@@ -184,7 +198,7 @@ func TestEngineNormalizesV4MappedV6(t *testing.T) {
 	// of an unlisted address (one of each form) reach the count-2 ban tier.
 	fb2 := &fakeBanner{}
 	w, b := emptyLists()
-	e2 := NewEngine(NewTracker(time.Hour, schedule()), fb2, w, b)
+	e2 := NewEngine(NewTracker(time.Hour, schedule()), fb2, w, b, false)
 	e2.Report("5.6.7.8", "ssh")        // count 1
 	e2.Report("::ffff:5.6.7.8", "ssh") // same offender → count 2 → 10m ban
 	if len(fb2.bans) != 1 || fb2.bans[0].ip != "5.6.7.8" || fb2.bans[0].d != 10*time.Minute {

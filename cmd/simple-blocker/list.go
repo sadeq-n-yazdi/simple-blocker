@@ -104,8 +104,9 @@ func liftLiveBans(configPath, spec string) {
 		return
 	}
 	fw, err := firewall.New(cfg.Firewall.Mode, cfg.Firewall.Backend, firewall.Config{
-		SetName: cfg.IPSetName,
-		Chains:  cfg.Firewall.Chains,
+		SetName:     cfg.IPSetName,
+		Chains:      cfg.Firewall.Chains,
+		EnforceIPv6: cfg.Firewall.EnforceIPv6,
 	})
 	if err != nil {
 		fmt.Printf("note: config updated, but could not open the firewall to lift live bans (try sudo): %v\n", err)
