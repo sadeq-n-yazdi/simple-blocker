@@ -55,7 +55,9 @@ func cmdCheck(args []string) error {
 		mu.Lock()
 		defer mu.Unlock()
 		fmt.Printf("[%s] %s\n", m.Source, highlight(m, color))
-		if !*showActions {
+		// Skip the action when the IP group didn't participate (m.IP == ""),
+		// otherwise we'd simulate offenses for the empty string.
+		if !*showActions || m.IP == "" {
 			return
 		}
 		ban, count := tracker.Record(m.IP)
@@ -74,7 +76,10 @@ func cmdCheck(args []string) error {
 	}
 	// Recent history: read each source sequentially so escalation is deterministic.
 	for _, c := range sources {
-		if err := source.Scan(ctx, c, false, onMatch); err != nil {
+		if ctx.Err() != nil {
+			break // cancelled (Ctrl-C): don't run the remaining sources
+		}
+		if err := source.Scan(ctx, c, false, onMatch); err != nil && ctx.Err() == nil {
 			fmt.Fprintf(os.Stderr, "source %q: %v\n", label(c), err)
 		}
 	}
