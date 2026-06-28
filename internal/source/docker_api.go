@@ -102,7 +102,14 @@ func (d *stdDemuxReader) Read(p []byte) (int, error) {
 		if _, err := io.ReadFull(d.src, d.hdr[:]); err != nil {
 			return 0, err // io.EOF / io.ErrUnexpectedEOF propagate
 		}
-		d.remaining = int(binary.BigEndian.Uint32(d.hdr[4:8]))
+		// Guard the uint32→int cast: on 32-bit builds (armv7) a size >= 2^31
+		// would overflow to a negative remaining and panic the p[:n] slice.
+		// A frame that large is never legitimate; treat it as a corrupt stream.
+		size := binary.BigEndian.Uint32(d.hdr[4:8])
+		if size > 0x7fffffff {
+			return 0, fmt.Errorf("docker api: frame size %d too large (corrupt stream?)", size)
+		}
+		d.remaining = int(size)
 	}
 	n := len(p)
 	if n > d.remaining {

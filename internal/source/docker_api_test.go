@@ -96,6 +96,16 @@ func TestDemuxManyZeroLengthFrames(t *testing.T) {
 	}
 }
 
+func TestDemuxOversizedFrame(t *testing.T) {
+	// A header claiming ~4 GiB must be rejected, not cast to a negative int
+	// (which would panic the slice on 32-bit builds).
+	hdr := []byte{1, 0, 0, 0, 0xff, 0xff, 0xff, 0xff}
+	_, err := scanDemux(t, hdr)
+	if err == nil {
+		t.Fatal("expected error for oversized frame")
+	}
+}
+
 func TestDemuxTruncatedHeader(t *testing.T) {
 	// 5 bytes is less than the 8-byte header → ErrUnexpectedEOF.
 	_, err := scanDemux(t, []byte{1, 0, 0, 0, 5})
