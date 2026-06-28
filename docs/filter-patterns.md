@@ -87,11 +87,16 @@ amplification), and common CMS admin panels even on sites that don't run them.
 - type: docker            # or journal, file — whatever carries your access log
   name: web-cms-probe
   target: my-nginx-1
-  pattern: '(?i)(?P<ip>\d{1,3}(?:\.\d{1,3}){3})\s.*"[A-Z]+\s+\S*(?:/wp-login\.php|/wp-admin/|/xmlrpc\.php|/wp-json/wp/v2/users|/administrator/|/admin/login|/user/login|/typo3/|/bitrix/)\S*'
+  pattern: '(?i)(?P<ip>\d{1,3}(?:\.\d{1,3}){3})\s.*"[A-Z]+\s+\S*(?:/wp-login\.php|/wp-admin/|/xmlrpc\.php|/wp-json/wp/v2/users|/administrator/|/typo3/|/bitrix/)\S*'
 ```
 
 > If you *do* run WordPress, scope this to failures so real logins survive — add
 > a trailing status class: `...\S*\s+HTTP/\d\.\d"\s+(?:401|403|404)\s`.
+>
+> This list sticks to product-specific admin paths. Generic login endpoints like
+> `/admin/login` or `/user/login` are deliberately left out — they're legitimate
+> on many custom apps, and matching them status-less would ban real users. If you
+> want to watch them, add them only with the failure-status class above.
 
 ### 2. Sensitive-file & secret disclosure attempts
 
@@ -188,14 +193,19 @@ The default source. SSH brute force is relentless; match the several failure
 shapes `sshd` emits. The dual-stack capture handles IPv6 brute force too.
 
 The IP here *floats* after `.*?`, so it uses the IP-shaped dual-stack class (see
-the caveat above) — the permissive class would grab the `f` in `Failed`.
+the caveat above) — the permissive class would grab the `f` in `Failed`. The
+prefix is split into two alternatives because newer OpenSSH logs the address
+*without* a `from`/`by` immediately before it — e.g. `Connection closed by
+invalid user admin 1.2.3.4 port 22 [preauth]` — so that family is matched
+separately (with the `user <name>` part optional, to also catch the bare
+`Connection closed by 1.2.3.4` form).
 
 ```yaml
 - type: journal
   name: ssh
   target: ssh                # systemd unit/identifier
   since: -1d
-  pattern: '(?:Failed password|Invalid user|authentication failure|Connection (?:closed|reset) by (?:invalid |authenticating )?user|Did not receive identification string|maximum authentication attempts exceeded|Bad protocol version identification).*?(?:from|by)\s+\[?(?P<ip>\d{1,3}(?:\.\d{1,3}){3}|[0-9a-fA-F:]*:[0-9a-fA-F:.]+)\]?'
+  pattern: '(?:(?:Failed password|Invalid user|authentication failure|Did not receive identification string|maximum authentication attempts exceeded|Bad protocol version identification).*?(?:from|by)\s+|Connection (?:closed|reset) by (?:(?:invalid |authenticating )?user \S+ )?)\[?(?P<ip>\d{1,3}(?:\.\d{1,3}){3}|[0-9a-fA-F:]*:[0-9a-fA-F:.]+)\]?'
 ```
 
 > Keep the original narrow `Invalid user \S+ from \[?(?P<ip>[0-9a-fA-F:.]+)\]?`
@@ -274,7 +284,7 @@ attacks. Match the server's auth-failure line.
   name: postgres-auth
   target: postgresql
   since: -1d
-  pattern: '(?:password authentication failed|no pg_hba\.conf entry) for.*?host\s+(?P<ip>[0-9a-fA-F:.]+)'
+  pattern: '(?:password authentication failed|no pg_hba\.conf entry) for.*?(?:host|client)\s+"?(?P<ip>[0-9a-fA-F:.]+)"?'
 
 # Redis (unauthenticated command probes / AUTH failures)
 - type: docker
