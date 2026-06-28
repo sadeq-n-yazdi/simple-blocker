@@ -50,15 +50,24 @@ func Serve(ctx context.Context, path string, build func() (Snapshot, error)) err
 	if err != nil {
 		return fmt.Errorf("control: listen %s: %w", path, err)
 	}
+	defer ln.Close()
+	defer os.Remove(path)
+
 	if err := os.Chmod(path, 0o600); err != nil {
 		slog.Warn("control: chmod socket", "err", err)
 	}
 	slog.Info("control socket listening", "path", path)
 
+	// Close the listener on cancel so Accept unblocks; stop tears the goroutine
+	// down on every return path (including an Accept error) so it never leaks.
+	stop := make(chan struct{})
+	defer close(stop)
 	go func() {
-		<-ctx.Done()
-		_ = ln.Close()
-		_ = os.Remove(path)
+		select {
+		case <-ctx.Done():
+			_ = ln.Close()
+		case <-stop:
+		}
 	}()
 
 	for {

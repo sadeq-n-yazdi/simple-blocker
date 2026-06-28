@@ -2,10 +2,40 @@ package control
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestServeCleansUpOnCancel(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "ctl.sock")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Serve(ctx, sock, func() (Snapshot, error) { return Snapshot{}, nil }) }()
+
+	// Wait for the socket to appear.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(sock); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Serve returned error on cancel: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve did not return after cancel")
+	}
+	if _, err := os.Stat(sock); !os.IsNotExist(err) {
+		t.Errorf("socket file not removed after shutdown: %v", err)
+	}
+}
 
 func TestServeAndDial(t *testing.T) {
 	sock := filepath.Join(t.TempDir(), "ctl.sock")
