@@ -32,12 +32,14 @@ var (
 // overrides holds CLI flags that take precedence over the config file when set.
 type overrides struct {
 	firewallMode string
+	dockerMode   string
 }
 
 func main() {
 	configPath := flag.String("config", "/etc/simple-blocker/config.yaml", "path to the config file (.yaml, .yml or .json)")
 	showVersion := flag.Bool("version", false, "print version information and exit")
 	firewallMode := flag.String("firewall-mode", "", "override firewall.mode: internal or external")
+	dockerMode := flag.String("docker-mode", "", "override mode for all docker sources: internal or external")
 	flag.Parse()
 
 	// Support both `simple-blocker version` and `-version`.
@@ -49,7 +51,7 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	slog.Info("simple-blocker", "version", version, "commit", buildCommit(), "date", buildDate())
 
-	if err := run(*configPath, overrides{firewallMode: *firewallMode}); err != nil {
+	if err := run(*configPath, overrides{firewallMode: *firewallMode, dockerMode: *dockerMode}); err != nil {
 		slog.Error("fatal", "err", err)
 		os.Exit(1)
 	}
@@ -111,8 +113,21 @@ func run(configPath string, ov overrides) error {
 	if err != nil {
 		return err
 	}
+	// Apply CLI overrides, then re-validate if any were set.
+	applied := false
 	if ov.firewallMode != "" {
 		cfg.Firewall.Mode = ov.firewallMode
+		applied = true
+	}
+	if ov.dockerMode != "" {
+		for i := range cfg.Sources {
+			if cfg.Sources[i].Type == "docker" {
+				cfg.Sources[i].Mode = ov.dockerMode
+			}
+		}
+		applied = true
+	}
+	if applied {
 		if err := cfg.Validate(); err != nil {
 			return err
 		}
