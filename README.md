@@ -189,10 +189,26 @@ Append another entry under `sources`. For example, to ban IPs probing for
 ```sh
 systemctl status simple-blocker        # service health
 journalctl -u simple-blocker -f        # live logs (bans are logged here)
+```
 
-# Inspect current bans:
-sudo ipset list simple_blacklist       # iptables backend
-sudo nft list set inet simple_blocker simple_blacklist   # nftables backend
+### `status` — see what's blocked
+
+```sh
+sudo simple-blocker status             # human table
+sudo simple-blocker status -json       # machine-readable
+```
+
+`status` shows the **currently-banned IPs** (with remaining time) and, when the
+daemon is running, its **offense tracker** plus the **diff** between them — most
+usefully any IP that is over the ban threshold but somehow *not* in the firewall
+set. It reads the daemon's read-only control socket
+(`control_socket`, default `/run/simple-blocker.sock`); if the daemon isn't
+running it falls back to reading the firewall set directly (needs root) and says
+so. You can still inspect the raw set yourself:
+
+```sh
+sudo ipset list simple_blacklist                          # iptables backend
+sudo nft list set inet simple_blocker simple_blacklist    # nftables backend
 ```
 
 On shutdown the service removes its drop rules but **keeps the ban set**, so

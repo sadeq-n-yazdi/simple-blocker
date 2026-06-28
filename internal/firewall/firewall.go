@@ -19,9 +19,21 @@ type Firewall interface {
 	Setup() error
 	// Ban adds ip to the banned set for the given duration.
 	Ban(ip string, d time.Duration) error
+	// List returns the IPs currently in the banned set with their remaining
+	// time. It must work without a prior Setup so a standalone "status" can
+	// read the set directly.
+	List() ([]BanEntry, error)
 	// Teardown removes the drop rules. The banned set is intentionally left
 	// in place so existing bans survive a restart.
 	Teardown() error
+}
+
+// BanEntry is one address in the banned set.
+type BanEntry struct {
+	IP string
+	// Expires is the remaining time before the ban lifts. It is 0 when the
+	// backend cannot report it (e.g. a permanent entry).
+	Expires time.Duration
 }
 
 // Config holds the settings a backend needs to build its rules.

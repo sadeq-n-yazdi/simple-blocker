@@ -29,6 +29,9 @@ type Config struct {
 	Firewall Firewall `yaml:"firewall" json:"firewall"`
 	// Sources is the list of log sources to monitor.
 	Sources []Source `yaml:"sources" json:"sources"`
+	// ControlSocket is the unix socket the daemon serves live status on, and
+	// that the `status` command reads. Defaults to /run/simple-blocker.sock.
+	ControlSocket string `yaml:"control_socket" json:"control_socket"`
 }
 
 // Firewall configures the enforcement backend.
@@ -184,6 +187,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Window == 0 {
 		c.Window = Duration(3 * time.Hour)
+	}
+	if c.ControlSocket == "" {
+		c.ControlSocket = "/run/simple-blocker.sock"
 	}
 	if c.Firewall.Mode == "" {
 		c.Firewall.Mode = "internal"

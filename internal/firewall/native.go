@@ -122,6 +122,36 @@ func (f *native) Ban(ip string, d time.Duration) error {
 	return f.conn.Flush()
 }
 
+// List reads the set's elements over netlink. It works without a prior Setup
+// by resolving the set by name, so a standalone "status" can read live bans.
+func (f *native) List() ([]BanEntry, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	set := f.set
+	if set == nil {
+		s, err := f.conn.GetSetByName(
+			&nftables.Table{Family: nftables.TableFamilyINet, Name: nftTable},
+			f.setName,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("nftables: get set %q: %w", f.setName, err)
+		}
+		set = s
+	}
+	els, err := f.conn.GetSetElements(set)
+	if err != nil {
+		return nil, fmt.Errorf("nftables: get set elements: %w", err)
+	}
+	entries := make([]BanEntry, 0, len(els))
+	for _, el := range els {
+		entries = append(entries, BanEntry{
+			IP:      net.IP(el.Key).String(),
+			Expires: el.Expires,
+		})
+	}
+	return entries, nil
+}
+
 func (f *native) Teardown() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

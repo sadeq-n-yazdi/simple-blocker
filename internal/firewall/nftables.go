@@ -1,6 +1,8 @@
 package firewall
 
 import (
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"time"
@@ -59,6 +61,60 @@ func (f *nfTables) Ban(ip string, d time.Duration) error {
 	_, _ = runner("nft", "delete", "element", "inet", nftTable, f.set, "{", ip, "}")
 	return run("nft", "add", "element", "inet", nftTable, f.set,
 		"{", ip, "timeout", timeout, "}")
+}
+
+// List runs `nft -j list set …` and parses the JSON elements. Each element is
+// either a bare address string or an object carrying timeout/expires (seconds).
+func (f *nfTables) List() ([]BanEntry, error) {
+	out, err := runner("nft", "-j", "list", "set", "inet", nftTable, f.set)
+	if err != nil {
+		return nil, err
+	}
+	return parseNFTSetJSON(out)
+}
+
+func parseNFTSetJSON(out string) ([]BanEntry, error) {
+	var doc struct {
+		Nftables []map[string]json.RawMessage `json:"nftables"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		return nil, fmt.Errorf("nft list: parse json: %w", err)
+	}
+	var entries []BanEntry
+	for _, obj := range doc.Nftables {
+		raw, ok := obj["set"]
+		if !ok {
+			continue
+		}
+		var set struct {
+			Elem []json.RawMessage `json:"elem"`
+		}
+		if err := json.Unmarshal(raw, &set); err != nil {
+			return nil, fmt.Errorf("nft list: parse set: %w", err)
+		}
+		for _, el := range set.Elem {
+			// Bare string element (no timeout attributes).
+			var ip string
+			if err := json.Unmarshal(el, &ip); err == nil {
+				entries = append(entries, BanEntry{IP: ip})
+				continue
+			}
+			// Object element: {"elem":{"val":"1.2.3.4","expires":59}}.
+			var wrap struct {
+				Elem struct {
+					Val     string `json:"val"`
+					Expires int    `json:"expires"`
+				} `json:"elem"`
+			}
+			if err := json.Unmarshal(el, &wrap); err == nil && wrap.Elem.Val != "" {
+				entries = append(entries, BanEntry{
+					IP:      wrap.Elem.Val,
+					Expires: time.Duration(wrap.Elem.Expires) * time.Second,
+				})
+			}
+		}
+	}
+	return entries, nil
 }
 
 func (f *nfTables) Teardown() error {

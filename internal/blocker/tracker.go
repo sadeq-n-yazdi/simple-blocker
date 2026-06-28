@@ -55,3 +55,39 @@ func (t *Tracker) Record(ip string) (ban time.Duration, count int) {
 	count = len(kept)
 	return t.schedule.DurationFor(count), count
 }
+
+// OffenseEntry is a per-IP view of the tracker: how many offenses fall inside
+// the window right now, and the ban that count maps to.
+type OffenseEntry struct {
+	IP       string
+	Count    int
+	WouldBan time.Duration
+}
+
+// Snapshot returns the current in-window offense state per IP, without
+// recording a new offense. It is read-only and safe for concurrent use.
+func (t *Tracker) Snapshot() []OffenseEntry {
+	cutoff := t.now().Add(-t.window)
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	out := make([]OffenseEntry, 0, len(t.offenses))
+	for ip, stamps := range t.offenses {
+		count := 0
+		for _, ts := range stamps {
+			if ts.After(cutoff) {
+				count++
+			}
+		}
+		if count == 0 {
+			continue
+		}
+		out = append(out, OffenseEntry{
+			IP:       ip,
+			Count:    count,
+			WouldBan: t.schedule.DurationFor(count),
+		})
+	}
+	return out
+}
