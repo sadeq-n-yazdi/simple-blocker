@@ -94,6 +94,10 @@ func cmdCheck(args []string) error {
 }
 
 func scanConcurrent(ctx context.Context, sources []config.Source, onMatch func(source.Match)) error {
+	// Cancel all sources as soon as one fails so a single source error doesn't
+	// leave the others streaming forever (wg.Wait would block until Ctrl-C).
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var scanErr error
@@ -105,6 +109,7 @@ func scanConcurrent(ctx context.Context, sources []config.Source, onMatch func(s
 				mu.Lock()
 				scanErr = errors.Join(scanErr, fmt.Errorf("source %q: %w", label(c), err))
 				mu.Unlock()
+				cancel()
 			}
 		}(c)
 	}
