@@ -70,6 +70,12 @@ func cmdCheck(args []string) error {
 		if !*showActions || m.IP == "" {
 			return
 		}
+		// Normalize IPv4-mapped IPv6 (e.g. ::ffff:1.2.3.4) to plain IPv4 exactly
+		// as Engine.Report does, so the dry-run's whitelist/blacklist checks and
+		// offense tracking key on the same string the daemon would.
+		if addr, err := netip.ParseAddr(m.IP); err == nil {
+			m.IP = addr.Unmap().String()
+		}
 		// Mirror the daemon's policy: whitelist wins, then permanent blacklist,
 		// then the escalating schedule.
 		if white.Contains(m.IP) {
