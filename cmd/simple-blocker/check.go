@@ -48,6 +48,11 @@ func cmdCheck(args []string) error {
 	}
 	color := useColor(*colorMode)
 
+	white, black, err := cfg.IPLists()
+	if err != nil {
+		return err
+	}
+
 	// A single dry-run tracker so the simulated offense counts escalate just
 	// like the daemon's would. Nothing is banned.
 	tracker := blocker.NewTracker(cfg.Window.Duration(), cfg.BanSchedule)
@@ -62,6 +67,16 @@ func cmdCheck(args []string) error {
 		// Skip the action when the IP group didn't participate (m.IP == ""),
 		// otherwise we'd simulate offenses for the empty string.
 		if !*showActions || m.IP == "" {
+			return
+		}
+		// Mirror the daemon's policy: whitelist wins, then permanent blacklist,
+		// then the escalating schedule.
+		if white.Contains(m.IP) {
+			fmt.Printf("    → %s is whitelisted — would not ban\n", m.IP)
+			return
+		}
+		if black.Contains(m.IP) {
+			fmt.Printf("    → %s is blacklisted — would ban permanently\n", m.IP)
 			return
 		}
 		ban, count := tracker.Record(m.IP)

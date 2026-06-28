@@ -4,6 +4,7 @@ package firewall
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -121,6 +122,40 @@ func (f *native) Ban(ip string, d time.Duration) error {
 		return fmt.Errorf("nftables: add element: %w", err)
 	}
 	return f.conn.Flush()
+}
+
+func (f *native) Unban(ip string) error {
+	addr := net.ParseIP(ip)
+	if addr == nil || addr.To4() == nil {
+		return fmt.Errorf("nftables: not an IPv4 address: %q", ip)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.set == nil {
+		s, err := f.conn.GetSetByName(
+			&nftables.Table{Family: nftables.TableFamilyINet, Name: nftTable},
+			f.setName,
+		)
+		if err != nil {
+			return fmt.Errorf("nftables: get set %q: %w", f.setName, err)
+		}
+		// Cache so a liftLiveBans loop doesn't re-query the set per call.
+		f.set = s
+	}
+	if err := f.conn.SetDeleteElements(f.set, []nftables.SetElement{
+		{Key: addr.To4()},
+	}); err != nil {
+		return fmt.Errorf("nftables: delete element: %w", err)
+	}
+	if err := f.conn.Flush(); err != nil {
+		// Deleting an absent element surfaces here as ENOENT; the Unban
+		// contract is a no-op in that case, matching the other backends.
+		if errors.Is(err, unix.ENOENT) {
+			return nil
+		}
+		return fmt.Errorf("nftables: flush: %w", err)
+	}
+	return nil
 }
 
 // List reads the set's elements over netlink. It works without a prior Setup

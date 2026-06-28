@@ -56,12 +56,23 @@ func (f *nfTables) Setup() error {
 }
 
 func (f *nfTables) Ban(ip string, d time.Duration) error {
-	timeout := strconv.Itoa(int(d.Seconds())) + "s"
 	// `add element` errors if the element already exists, so drop any prior
 	// entry first (ignoring "not found") to refresh its timeout.
 	_, _ = runner("nft", "delete", "element", "inet", nftTable, f.set, "{", ip, "}")
+	// A duration <= 0 is a permanent ban: omit the timeout tokens entirely, as
+	// `timeout 0s` is rejected by nft.
+	if d <= 0 {
+		return run("nft", "add", "element", "inet", nftTable, f.set, "{", ip, "}")
+	}
+	timeout := strconv.Itoa(int(d.Seconds())) + "s"
 	return run("nft", "add", "element", "inet", nftTable, f.set,
 		"{", ip, "timeout", timeout, "}")
+}
+
+func (f *nfTables) Unban(ip string) error {
+	// Ignore "not found" so removing an absent element is a no-op.
+	_, _ = runner("nft", "delete", "element", "inet", nftTable, f.set, "{", ip, "}")
+	return nil
 }
 
 // List runs `nft -j list set …` and parses the JSON elements. Each element is

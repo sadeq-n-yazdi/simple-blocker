@@ -18,8 +18,11 @@ type Firewall interface {
 	// Setup creates the backing set and installs the drop rules. It must be
 	// idempotent so restarts are safe.
 	Setup() error
-	// Ban adds ip to the banned set for the given duration.
+	// Ban adds ip to the banned set for the given duration. A duration d <= 0
+	// means a permanent ban (no expiry).
 	Ban(ip string, d time.Duration) error
+	// Unban removes ip from the banned set. It is a no-op if ip is absent.
+	Unban(ip string) error
 	// List returns the IPs currently in the banned set with their remaining
 	// time. It must work without a prior Setup so a standalone "status" can
 	// read the set directly. The context bounds the underlying firewall query

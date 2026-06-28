@@ -46,8 +46,19 @@ func (f *ipTables) Setup() error {
 }
 
 func (f *ipTables) Ban(ip string, d time.Duration) error {
-	secs := strconv.Itoa(int(d.Seconds()))
-	return run("ipset", "add", "-exist", f.set, ip, "timeout", secs)
+	// timeout 0 = permanent (ipset never expires the element). Clamp d<=0 to 0
+	// so a non-positive duration honors the permanent-ban convention rather than
+	// emitting a negative timeout.
+	secs := 0
+	if d > 0 {
+		secs = int(d.Seconds())
+	}
+	return run("ipset", "add", "-exist", f.set, ip, "timeout", strconv.Itoa(secs))
+}
+
+func (f *ipTables) Unban(ip string) error {
+	// -exist suppresses the error when the element is not in the set.
+	return run("ipset", "del", "-exist", f.set, ip)
 }
 
 // List parses `ipset list <set>`. Members appear after a "Members:" line, one
