@@ -52,6 +52,12 @@ type Firewall struct {
 	// Chains lists the iptables chains to insert the DROP rule into
 	// (e.g. INPUT, DOCKER-USER). Ignored by the nftables backend.
 	Chains []string `yaml:"chains" json:"chains"`
+	// EnforceIPv6 opts in to banning IPv6 offenders in the firewall. It is off
+	// by default: matching (whitelist/blacklist) already handles v6, but actual
+	// enforcement adds a parallel v6 set and drop rule, which on some hosts
+	// (e.g. Docker without IPv6) needs deliberate enabling. Best-effort: a host
+	// that can't establish v6 rules logs and keeps enforcing v4.
+	EnforceIPv6 bool `yaml:"enforce_ipv6" json:"enforce_ipv6"`
 }
 
 // Source describes a single log source to tail for offenders.

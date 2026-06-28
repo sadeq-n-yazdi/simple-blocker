@@ -25,14 +25,18 @@ type listSet struct {
 
 // Engine connects offense reports to ban enforcement.
 type Engine struct {
-	tracker *Tracker
-	banner  Banner
-	lists   atomic.Pointer[listSet]
+	tracker   *Tracker
+	banner    Banner
+	lists     atomic.Pointer[listSet]
+	enforceV6 bool
 }
 
 // NewEngine wires a tracker to a banner with the initial whitelist/blacklist.
-func NewEngine(tracker *Tracker, banner Banner, white, black *ipmatch.List) *Engine {
-	e := &Engine{tracker: tracker, banner: banner}
+// enforceV6 mirrors firewall.Config.EnforceIPv6: when false, IPv6 targets are
+// skipped at the ban chokepoint so they don't reach a backend that isn't set up
+// to enforce them.
+func NewEngine(tracker *Tracker, banner Banner, white, black *ipmatch.List, enforceV6 bool) *Engine {
+	e := &Engine{tracker: tracker, banner: banner, enforceV6: enforceV6}
 	e.lists.Store(&listSet{white: white, black: black})
 	return e
 }
@@ -70,12 +74,17 @@ func (e *Engine) Report(ip, src string) {
 	e.ban(ip, src, ban, "schedule", count)
 }
 
-// ban enforces a single ban, guarding against the IPv4-only backends: a
-// non-IPv4 target can't be enforced, so it is warned about and skipped rather
-// than producing a per-hit backend error.
+// ban enforces a single ban. An unparseable address is always skipped. An IPv6
+// target is skipped unless v6 enforcement is enabled (the backends only build a
+// v6 set when enforce_ipv6 is on), avoiding a per-hit backend error.
 func (e *Engine) ban(ip, src string, d time.Duration, reason string, count int) {
-	if addr, err := netip.ParseAddr(ip); err != nil || !(addr.Is4() || addr.Is4In6()) {
-		slog.Warn("ipv6 enforcement unsupported, skipping", "ip", ip, "source", src, "reason", reason)
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		slog.Warn("unparseable address, skipping ban", "ip", ip, "source", src, "reason", reason)
+		return
+	}
+	if addr.Is6() && !addr.Is4In6() && !e.enforceV6 {
+		slog.Debug("ipv6 enforcement disabled, skipping", "ip", ip, "source", src, "reason", reason)
 		return
 	}
 	if err := e.banner.Ban(ip, d); err != nil {
