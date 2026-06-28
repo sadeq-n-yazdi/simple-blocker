@@ -109,6 +109,19 @@ func TestDemuxZeroLengthReadIsNoOp(t *testing.T) {
 	}
 }
 
+func TestDemuxCorruptHeader(t *testing.T) {
+	// A valid frame followed by a garbage header (bad stream id) must surface
+	// an error rather than parsing the garbage as a size.
+	raw := append(frame(1, "ok 1.1.1.1\n"), []byte{9, 0, 0, 0, 0, 0, 0, 1}...)
+	lines, err := scanDemux(t, raw)
+	if err == nil {
+		t.Fatal("expected error on corrupt frame header")
+	}
+	if len(lines) != 1 || lines[0] != "ok 1.1.1.1" {
+		t.Fatalf("expected first frame to be read, got %q", lines)
+	}
+}
+
 func TestDemuxOversizedFrame(t *testing.T) {
 	// A header claiming ~4 GiB must be rejected, not cast to a negative int
 	// (which would panic the slice on 32-bit builds).

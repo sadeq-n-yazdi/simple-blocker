@@ -109,6 +109,12 @@ func (d *stdDemuxReader) Read(p []byte) (int, error) {
 		if _, err := io.ReadFull(d.src, d.hdr[:]); err != nil {
 			return 0, err // io.EOF / io.ErrUnexpectedEOF propagate
 		}
+		// Validate the stdcopy header (stream id in {0,1,2}, padding zero) on
+		// every frame so a desynced/garbage stream fails fast instead of
+		// reading a bogus size or silently skipping data.
+		if d.hdr[0] > 2 || d.hdr[1] != 0 || d.hdr[2] != 0 || d.hdr[3] != 0 {
+			return 0, fmt.Errorf("docker api: corrupt frame header")
+		}
 		// Guard the uint32→int cast: on 32-bit builds (armv7) a size >= 2^31
 		// would overflow to a negative remaining and panic the p[:n] slice.
 		// A frame that large is never legitimate; treat it as a corrupt stream.
