@@ -54,6 +54,15 @@ func TestJournalCmd(t *testing.T) {
 	if fname != "stdbuf" || !contains(fargs, "-af") {
 		t.Errorf("follow journal should be stdbuf … -af: %q %v", fname, fargs)
 	}
+	// An empty since must not produce a bare `--since=` (journalctl errors on it).
+	for _, follow := range []bool{false, true} {
+		_, a := journalCmd("ssh", "", follow)
+		for _, arg := range a {
+			if strings.HasPrefix(arg, "--since") {
+				t.Errorf("empty since should omit --since (follow=%v): %v", follow, a)
+			}
+		}
+	}
 }
 
 // TestScanMatchSpans drives streamSource.stream (which Scan wraps) through a

@@ -109,12 +109,21 @@ func dockerLogsCmd(target string, follow bool) (string, []string) {
 }
 
 // journalCmd builds the journalctl argv. Following uses stdbuf+`-af` for live
-// line-buffered output; otherwise it reads since the cutoff and exits.
+// line-buffered output; otherwise it reads since the cutoff and exits. --since
+// is omitted when empty (a bare `--since=` makes journalctl error out).
 func journalCmd(unit, since string, follow bool) (string, []string) {
 	if follow {
-		return "stdbuf", []string{"-oL", "journalctl", "-af", "--since=" + since, "-u", unit}
+		args := []string{"-oL", "journalctl", "-af"}
+		if since != "" {
+			args = append(args, "--since="+since)
+		}
+		return "stdbuf", append(args, "-u", unit)
 	}
-	return "journalctl", []string{"--no-pager", "--since=" + since, "-u", unit}
+	args := []string{"--no-pager"}
+	if since != "" {
+		args = append(args, "--since="+since)
+	}
+	return "journalctl", append(args, "-u", unit)
 }
 
 // Match is one log line that matched a source's pattern. IPStart/IPEnd index

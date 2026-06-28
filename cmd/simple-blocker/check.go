@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -23,13 +24,16 @@ const (
 // matches a configured pattern with the IP highlighted, and (by default) the
 // action the daemon would take, simulated against the ban schedule.
 func cmdCheck(args []string) error {
-	fs := flag.NewFlagSet("check", flag.ExitOnError)
+	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	configPath := fs.String("config", defaultConfigPath, "path to the config file")
 	follow := fs.Bool("follow", false, "stream logs live instead of reading recent history")
 	srcName := fs.String("source", "", "only check the named source (default: all)")
 	colorMode := fs.String("color", "auto", "colorize the IP: auto|always|never")
 	showActions := fs.Bool("actions", true, "print the action that would be taken for each match")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil // -h/-help already printed usage
+		}
 		return err
 	}
 
@@ -75,15 +79,18 @@ func cmdCheck(args []string) error {
 		return scanConcurrent(ctx, sources, onMatch)
 	}
 	// Recent history: read each source sequentially so escalation is deterministic.
+	var scanErr error
 	for _, c := range sources {
 		if ctx.Err() != nil {
 			break // cancelled (Ctrl-C): don't run the remaining sources
 		}
 		if err := source.Scan(ctx, c, false, onMatch); err != nil && ctx.Err() == nil {
 			fmt.Fprintf(os.Stderr, "source %q: %v\n", label(c), err)
+			scanErr = errors.Join(scanErr, fmt.Errorf("source %q: %w", label(c), err))
 		}
 	}
-	return nil
+	// Non-zero exit when any source failed, so scripts can detect it.
+	return scanErr
 }
 
 func scanConcurrent(ctx context.Context, sources []config.Source, onMatch func(source.Match)) error {
