@@ -65,4 +65,9 @@ func TestUseColorNever(t *testing.T) {
 	if useColor("auto") {
 		t.Error("auto must honor NO_COLOR")
 	}
+	// Presence disables color even when the value is empty (no-color.org).
+	t.Setenv("NO_COLOR", "")
+	if useColor("auto") {
+		t.Error("auto must honor an empty-but-present NO_COLOR")
+	}
 }

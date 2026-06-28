@@ -85,27 +85,31 @@ func cmdCheck(args []string) error {
 			break // cancelled (Ctrl-C): don't run the remaining sources
 		}
 		if err := source.Scan(ctx, c, false, onMatch); err != nil && ctx.Err() == nil {
-			fmt.Fprintf(os.Stderr, "source %q: %v\n", label(c), err)
+			// Don't print here — main prints the returned error (avoids a
+			// double print) and a non-nil return drives a non-zero exit.
 			scanErr = errors.Join(scanErr, fmt.Errorf("source %q: %w", label(c), err))
 		}
 	}
-	// Non-zero exit when any source failed, so scripts can detect it.
 	return scanErr
 }
 
 func scanConcurrent(ctx context.Context, sources []config.Source, onMatch func(source.Match)) error {
 	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var scanErr error
 	for _, c := range sources {
 		wg.Add(1)
 		go func(c config.Source) {
 			defer wg.Done()
 			if err := source.Scan(ctx, c, true, onMatch); err != nil && ctx.Err() == nil {
-				fmt.Fprintf(os.Stderr, "source %q: %v\n", label(c), err)
+				mu.Lock()
+				scanErr = errors.Join(scanErr, fmt.Errorf("source %q: %w", label(c), err))
+				mu.Unlock()
 			}
 		}(c)
 	}
 	wg.Wait()
-	return nil
+	return scanErr
 }
 
 func selectSources(all []config.Source, name string) []config.Source {
@@ -156,7 +160,8 @@ func useColor(mode string) bool {
 	case "never":
 		return false
 	default: // auto
-		if os.Getenv("NO_COLOR") != "" {
+		// Per https://no-color.org/, presence disables color whatever the value.
+		if _, ok := os.LookupEnv("NO_COLOR"); ok {
 			return false
 		}
 		fi, err := os.Stdout.Stat()
