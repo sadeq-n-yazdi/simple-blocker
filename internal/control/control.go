@@ -45,6 +45,11 @@ type Snapshot struct {
 // JSON Snapshot built by build, then closes it. It returns when ctx is
 // cancelled. The socket file is created 0600 and removed on shutdown.
 func Serve(ctx context.Context, path string, build func() (Snapshot, error)) error {
+	// Never remove a path that isn't a socket — a misconfigured path running as
+	// root could otherwise delete an arbitrary file.
+	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("control: path %s exists and is not a socket", path)
+	}
 	// If something is already listening, another daemon owns this socket; don't
 	// remove it out from under them. A failed dial means it's stale (or absent).
 	if conn, err := net.DialTimeout("unix", path, 100*time.Millisecond); err == nil {

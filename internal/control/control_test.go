@@ -71,6 +71,23 @@ func TestServeAndDial(t *testing.T) {
 	}
 }
 
+func TestServeRefusesNonSocket(t *testing.T) {
+	// A regular file at the path must not be removed; Serve should error out.
+	f := filepath.Join(t.TempDir(), "not-a-socket")
+	if err := os.WriteFile(f, []byte("important"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := Serve(ctx, f, func() (Snapshot, error) { return Snapshot{}, nil })
+	if err == nil {
+		t.Fatal("expected Serve to refuse a non-socket path")
+	}
+	if _, statErr := os.Stat(f); statErr != nil {
+		t.Errorf("Serve must not have removed the regular file: %v", statErr)
+	}
+}
+
 func TestDialNoServer(t *testing.T) {
 	if _, err := Dial(filepath.Join(t.TempDir(), "absent.sock")); err == nil {
 		t.Fatal("expected error dialing a missing socket")
