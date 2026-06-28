@@ -5,6 +5,7 @@
 package firewall
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"time"
@@ -21,8 +22,9 @@ type Firewall interface {
 	Ban(ip string, d time.Duration) error
 	// List returns the IPs currently in the banned set with their remaining
 	// time. It must work without a prior Setup so a standalone "status" can
-	// read the set directly.
-	List() ([]BanEntry, error)
+	// read the set directly. The context bounds the underlying firewall query
+	// so a hung command can't block the caller indefinitely.
+	List(ctx context.Context) ([]BanEntry, error)
 	// Teardown removes the drop rules. The banned set is intentionally left
 	// in place so existing bans survive a restart.
 	Teardown() error

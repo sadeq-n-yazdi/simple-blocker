@@ -24,8 +24,8 @@ import (
 
 // buildSnapshot assembles the daemon's control-socket snapshot from the live
 // firewall set and the offense tracker.
-func buildSnapshot(fw firewall.Firewall, tracker *blocker.Tracker) (control.Snapshot, error) {
-	bans, err := fw.List()
+func buildSnapshot(ctx context.Context, fw firewall.Firewall, tracker *blocker.Tracker) (control.Snapshot, error) {
+	bans, err := fw.List(ctx)
 	if err != nil {
 		return control.Snapshot{}, err
 	}
@@ -240,8 +240,8 @@ func run(configPath string, ov overrides) error {
 	// Serve live status on the control socket (read-only) for the `status`
 	// command. Failure to listen is non-fatal — the daemon still bans.
 	go func() {
-		if err := control.Serve(ctx, cfg.ControlSocket, func() (control.Snapshot, error) {
-			return buildSnapshot(fw, tracker)
+		if err := control.Serve(ctx, cfg.ControlSocket, func(ctx context.Context) (control.Snapshot, error) {
+			return buildSnapshot(ctx, fw, tracker)
 		}); err != nil {
 			slog.Warn("control socket unavailable", "err", err)
 		}

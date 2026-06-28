@@ -2,6 +2,7 @@ package firewall
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 )
@@ -11,6 +12,19 @@ import (
 var runner = func(name string, args ...string) (string, error) {
 	var buf bytes.Buffer
 	cmd := exec.Command(name, args...)
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	err := cmd.Run()
+	return buf.String(), err
+}
+
+// listRunner is the cancelable counterpart to runner, used by the List() read
+// paths so a hung firewall query (e.g. ipset/nft) can be aborted via context.
+// Kept separate from runner so the short, idempotent Setup/Ban/Teardown commands
+// stay untouched.
+var listRunner = func(ctx context.Context, name string, args ...string) (string, error) {
+	var buf bytes.Buffer
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 	err := cmd.Run()

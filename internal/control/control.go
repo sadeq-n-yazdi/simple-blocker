@@ -48,8 +48,10 @@ type Snapshot struct {
 
 // Serve listens on a unix socket at path and answers each connection with one
 // JSON Snapshot built by build, then closes it. It returns when ctx is
-// cancelled. The socket file is created 0600 and removed on shutdown.
-func Serve(ctx context.Context, path string, build func() (Snapshot, error)) error {
+// cancelled. The socket file is created 0600 and removed on shutdown. build
+// receives a context (derived from ctx, with a per-connection timeout) so a
+// slow or hung firewall query can be cancelled instead of leaking a goroutine.
+func Serve(ctx context.Context, path string, build func(context.Context) (Snapshot, error)) error {
 	// Never remove a path that isn't a socket — a misconfigured path running as
 	// root could otherwise delete an arbitrary file.
 	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSocket == 0 {
@@ -99,14 +101,18 @@ func Serve(ctx context.Context, path string, build func() (Snapshot, error)) err
 			}
 			return fmt.Errorf("control: accept: %w", err)
 		}
-		go serveConn(conn, build)
+		go serveConn(ctx, conn, build)
 	}
 }
 
-func serveConn(conn net.Conn, build func() (Snapshot, error)) {
+func serveConn(ctx context.Context, conn net.Conn, build func(context.Context) (Snapshot, error)) {
 	defer conn.Close()
 	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	snap, err := build()
+	// Bound the snapshot build so a hung firewall query can't pin this
+	// goroutine; daemon shutdown (ctx) also cancels an in-flight build.
+	bctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	snap, err := build(bctx)
 	if err != nil {
 		snap = Snapshot{Error: err.Error(), TS: time.Now().UTC().Format(time.RFC3339)}
 	}

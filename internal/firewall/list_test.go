@@ -1,6 +1,7 @@
 package firewall
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -86,14 +87,14 @@ func TestParseNFTSetJSONEmpty(t *testing.T) {
 // backends, confirming the right command is issued and output parsed.
 func TestIPTablesListViaRunner(t *testing.T) {
 	var gotCmd string
-	orig := runner
-	t.Cleanup(func() { runner = orig })
-	runner = func(name string, args ...string) (string, error) {
+	orig := listRunner
+	t.Cleanup(func() { listRunner = orig })
+	listRunner = func(_ context.Context, name string, args ...string) (string, error) {
 		gotCmd = name + " " + args[0]
 		return "Members:\n1.1.1.1 timeout 10\n", nil
 	}
 	fw := newIPTables(Config{SetName: "bl"})
-	entries, err := fw.List()
+	entries, err := fw.List(context.Background())
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}

@@ -3,6 +3,7 @@
 package firewall
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -124,7 +125,14 @@ func (f *native) Ban(ip string, d time.Duration) error {
 
 // List reads the set's elements over netlink. It works without a prior Setup
 // by resolving the set by name, so a standalone "status" can read live bans.
-func (f *native) List() ([]BanEntry, error) {
+func (f *native) List(ctx context.Context) ([]BanEntry, error) {
+	// The google/nftables netlink calls below are synchronous and cannot be
+	// cancelled mid-flight, so honoring ctx is best-effort: we bail before
+	// starting if it is already done. In practice these local netlink reads
+	// return promptly.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	set := f.set

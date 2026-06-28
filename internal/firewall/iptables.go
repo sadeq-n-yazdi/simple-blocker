@@ -2,6 +2,7 @@ package firewall
 
 import (
 	"bufio"
+	"context"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -51,8 +52,8 @@ func (f *ipTables) Ban(ip string, d time.Duration) error {
 
 // List parses `ipset list <set>`. Members appear after a "Members:" line, one
 // per line as "<ip>" optionally followed by "timeout <remaining-seconds>".
-func (f *ipTables) List() ([]BanEntry, error) {
-	out, err := runner("ipset", "list", f.set)
+func (f *ipTables) List(ctx context.Context) ([]BanEntry, error) {
+	out, err := listRunner(ctx, "ipset", "list", f.set)
 	if err != nil {
 		return nil, err
 	}

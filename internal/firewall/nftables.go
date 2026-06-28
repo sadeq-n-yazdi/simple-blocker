@@ -1,6 +1,7 @@
 package firewall
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -65,8 +66,8 @@ func (f *nfTables) Ban(ip string, d time.Duration) error {
 
 // List runs `nft -j list set …` and parses the JSON elements. Each element is
 // either a bare address string or an object carrying timeout/expires (seconds).
-func (f *nfTables) List() ([]BanEntry, error) {
-	out, err := runner("nft", "-j", "list", "set", "inet", nftTable, f.set)
+func (f *nfTables) List(ctx context.Context) ([]BanEntry, error) {
+	out, err := listRunner(ctx, "nft", "-j", "list", "set", "inet", nftTable, f.set)
 	if err != nil {
 		return nil, err
 	}

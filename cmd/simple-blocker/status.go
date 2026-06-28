@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -67,7 +68,9 @@ func fetchStatus(socket string, cfg *config.Config) (control.Snapshot, bool, err
 	if err != nil {
 		return control.Snapshot{}, false, err
 	}
-	bans, err := fw.List()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	bans, err := fw.List(ctx)
 	if err != nil {
 		return control.Snapshot{}, false, fmt.Errorf("daemon not reachable and reading firewall failed: %w", err)
 	}

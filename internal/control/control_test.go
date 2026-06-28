@@ -12,7 +12,9 @@ func TestServeCleansUpOnCancel(t *testing.T) {
 	sock := filepath.Join(t.TempDir(), "ctl.sock")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, sock, func() (Snapshot, error) { return Snapshot{}, nil }) }()
+	go func() {
+		done <- Serve(ctx, sock, func(context.Context) (Snapshot, error) { return Snapshot{}, nil })
+	}()
 
 	// Wait for the socket to appear.
 	deadline := time.Now().Add(2 * time.Second)
@@ -47,7 +49,7 @@ func TestServeAndDial(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go Serve(ctx, sock, func() (Snapshot, error) { return want, nil })
+	go Serve(ctx, sock, func(context.Context) (Snapshot, error) { return want, nil })
 
 	// Wait for the listener to come up.
 	var snap Snapshot
@@ -79,7 +81,7 @@ func TestServeRefusesNonSocket(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	err := Serve(ctx, f, func() (Snapshot, error) { return Snapshot{}, nil })
+	err := Serve(ctx, f, func(context.Context) (Snapshot, error) { return Snapshot{}, nil })
 	if err == nil {
 		t.Fatal("expected Serve to refuse a non-socket path")
 	}
@@ -98,7 +100,7 @@ func TestServeBuildError(t *testing.T) {
 	sock := filepath.Join(t.TempDir(), "err.sock")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go Serve(ctx, sock, func() (Snapshot, error) {
+	go Serve(ctx, sock, func(context.Context) (Snapshot, error) {
 		return Snapshot{}, errBuild
 	})
 	deadline := time.Now().Add(2 * time.Second)

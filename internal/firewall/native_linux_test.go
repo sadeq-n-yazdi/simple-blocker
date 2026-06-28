@@ -3,6 +3,7 @@
 package firewall
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -41,7 +42,7 @@ func TestNativeIntegration(t *testing.T) {
 		t.Fatalf("Ban: %v", err)
 	}
 	// List must see the banned IP with a positive remaining timeout.
-	entries, err := fw.List()
+	entries, err := fw.List(context.Background())
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
